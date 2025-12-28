@@ -25,3 +25,6 @@ DEFAULT_PROMPT_PATH = "prompts/alice.md"
 
 # 记忆文件路径
 MEMORY_FILE_PATH = "memory/alice_memory.md"
+
+# 任务清单路径
+TODO_FILE_PATH = "memory/todo.md"
