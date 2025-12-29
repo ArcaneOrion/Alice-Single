@@ -63,10 +63,22 @@ function App() {
   }, []);
 
   useEffect(() => {
+    fetchHistory();
     fetchStatus();
     const timer = setInterval(fetchStatus, 5000); // 每 5 秒轮询一次状态
     return () => clearInterval(timer);
   }, []);
+
+  const fetchHistory = async () => {
+    try {
+      const res = await axios.get('/api/history');
+      if (Array.isArray(res.data)) {
+        setMessages(res.data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch history:', err);
+    }
+  };
 
   const fetchStatus = async () => {
     try {

@@ -34,3 +34,6 @@ SHORT_TERM_MEMORY_FILE_PATH = "memory/short_term_memory.md"
 
 # 输出目录
 ALICE_OUTPUT_DIR = "alice_output"
+
+# 对话历史记录路径 (仅用于 UI 显示)
+CHAT_HISTORY_FILE_PATH = "memory/chat_history.json"
