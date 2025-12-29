@@ -23,9 +23,10 @@ class AliceAgent:
         # 权限与路径安全
         self.project_root = os.getcwd() 
         
-        # 沙盒配置
-        self.sandbox_venv = ".venv_alice"
-        self.sandbox_python = os.path.join(self.sandbox_venv, "bin", "python") if os.name != "nt" else os.path.join(self.sandbox_venv, "Scripts", "python.exe")
+        # 容器执行引擎配置 (常驻容器模式)
+        self.docker_image = "alice-sandbox:latest"
+        self.container_name = "alice-sandbox-instance"
+        self._ensure_docker_environment()
         
         # 内存快照管理器
         self.snapshot_mgr = SnapshotManager()
@@ -37,6 +38,47 @@ class AliceAgent:
         self.manage_memory()
         
         self._refresh_system_message()
+
+    def _ensure_docker_environment(self):
+        """确保 Docker 环境就绪，并启动常驻容器"""
+        try:
+            # 1. 检查 Docker 引擎
+            res = subprocess.run("docker --version", shell=True, capture_output=True)
+            if res.returncode != 0:
+                print("错误: 系统未检测到 Docker。Alice 需要 Docker 环境来确保执行安全与持久化。")
+                sys.exit(1)
+            
+            # 2. 检查镜像
+            res = subprocess.run(f"docker image inspect {self.docker_image}", shell=True, capture_output=True)
+            if res.returncode != 0:
+                print(f"警告: 未找到 Docker 镜像 {self.docker_image}。")
+                print(f"请在终端执行: docker build -t {self.docker_image} -f Dockerfile.sandbox .")
+                return
+
+            # 3. 检查/启动常驻容器
+            res = subprocess.run(f"docker ps -a --filter name={self.container_name} --format '{{{{.Status}}}}'", shell=True, capture_output=True, text=True)
+            status = res.stdout.lower()
+
+            if not status:
+                # 容器不存在，创建并启动
+                print(f"[系统]: 正在启动 Alice 常驻实验室容器...")
+                start_cmd = [
+                    "docker", "run", "-d",
+                    "--name", self.container_name,
+                    "-v", f"{self.project_root}:/app",
+                    "-w", "/app",
+                    self.docker_image,
+                    "tail", "-f", "/dev/null" # 保持运行
+                ]
+                subprocess.run(" ".join(start_cmd), shell=True, check=True)
+            elif "up" not in status:
+                # 容器存在但没运行，启动它
+                print(f"[系统]: 正在唤醒 Alice 常驻实验室容器...")
+                subprocess.run(f"docker start {self.container_name}", shell=True, check=True)
+            
+        except Exception as e:
+            print(f"初始化 Docker 环境时出错: {e}")
+            sys.exit(1)
 
     def _refresh_system_message(self):
         """刷新系统消息，注入最新的提示词、长期记忆、短期记忆、任务清单和文件索引快照"""
@@ -246,14 +288,11 @@ class AliceAgent:
             return f"更新记忆失败: {str(e)}"
 
     def is_safe_command(self, command):
-        danger_keywords = ["rm -rf /", "mkfs", "dd ", "> /dev/"]
-        for kw in danger_keywords:
-            if kw in command:
-                return False, f"检测到危险操作关键词: {kw}"
+        # 既然在常驻容器内运行，放开所有限制
         return True, ""
 
     def execute_command(self, command, is_python_code=False):
-        # 拦截内置指令
+        # 1. 拦截内置指令
         if not is_python_code:
             cmd_strip = command.strip()
             if cmd_strip.startswith("toolkit"):
@@ -265,30 +304,23 @@ class AliceAgent:
                 if content_match:
                     return self.handle_memory(content_match.group(1), target="ltm" if ltm_mode else "stm")
                 else:
-                    # 如果没带引号，尝试取第一个空格后的全部内容
                     parts = cmd_strip.split(None, 1)
                     if len(parts) > 1:
                         content = parts[1].replace("--ltm", "").strip().strip('"\'')
                         return self.handle_memory(content, target="ltm" if ltm_mode else "stm")
 
-        is_safe, error_msg = self.is_safe_command(command)
-        if not is_safe:
-            return f"安全性拦截: {error_msg}"
-
+        # 2. 准备 Docker 执行指令 (改用 exec 以支持环境持久化)
+        display_name = "Docker 常驻容器"
+        docker_exec_base = [
+            "docker", "exec",
+            "-w", "/app",
+            self.container_name
+        ]
+        
         if is_python_code:
-            tmp_file = "tmp_sandbox_exec.py"
-            with open(tmp_file, "w", encoding="utf-8") as f:
-                f.write(command)
-            real_command = f"{self.sandbox_python} {tmp_file}"
-            display_name = "Python 代码沙盒"
+            real_command = " ".join(docker_exec_base + ["python3", "-c", f"{repr(command)}"])
         else:
-            if command.startswith("python "):
-                real_command = command.replace("python ", f"{self.sandbox_python} ", 1)
-            elif command.startswith("pip "):
-                real_command = command.replace("pip ", f"{self.sandbox_python} -m pip ", 1)
-            else:
-                real_command = command
-            display_name = "Shell 沙盒"
+            real_command = " ".join(docker_exec_base + ["bash", "-c", f"{repr(command)}"])
 
         print(f"\n[Alice 正在执行 ({display_name})]: {command[:100]}{'...' if len(command) > 100 else ''}")
         
@@ -299,8 +331,7 @@ class AliceAgent:
                 capture_output=True,
                 text=True,
                 timeout=120,
-                cwd=self.project_root,
-                env={**os.environ, "PYTHONPATH": self.project_root}
+                env=os.environ
             )
             
             output = result.stdout
@@ -313,9 +344,6 @@ class AliceAgent:
             return "错误: 执行超时。"
         except Exception as e:
             return f"执行过程中出错: {str(e)}"
-        finally:
-            if is_python_code and os.path.exists("tmp_sandbox_exec.py"):
-                os.remove("tmp_sandbox_exec.py")
 
     def chat(self, user_input):
         self.messages.append({"role": "user", "content": user_input})
@@ -351,7 +379,7 @@ class AliceAgent:
                         print(c_chunk, end='', flush=True)
                         full_content += c_chunk
 
-            # 改进正则：允许 ```bash 后跟可选空格，且对换行符更宽容
+            # 提取代码块
             python_codes = re.findall(r'```python\s*\n?(.*?)\s*```', full_content, re.DOTALL)
             bash_commands = re.findall(r'```bash\s*\n?(.*?)\s*```', full_content, re.DOTALL)
             
@@ -371,9 +399,9 @@ class AliceAgent:
                 results.append(f"Shell 命令 `{cmd.strip()}` 的结果:\n{res}")
             
             feedback = "\n\n".join(results)
-            self.messages.append({"role": "user", "content": f"沙盒执行反馈：\n{feedback}"})
+            self.messages.append({"role": "user", "content": f"容器执行反馈：\n{feedback}"})
             
-            # 刷新系统消息（任何子命令执行后都可能改变文件状态，刷新快照）
+            # 刷新系统消息
             self._refresh_system_message()
                 
             print(f"\n{'-'*40}\n系统快照已更新，结果已反馈给 Alice，继续生成中...")

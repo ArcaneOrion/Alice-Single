@@ -1,0 +1,50 @@
+# Alice Agent 全能沙盒镜像
+# 这是一个为 Alice 设计的高权限、全功能 Linux 运行环境
+
+FROM ubuntu:22.04
+
+# 避免交互式提示
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 设置工作目录
+WORKDIR /app
+
+# 1. 更新基础系统并安装核心工具
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    wget \
+    git \
+    build-essential \
+    pkg-config \
+    libssl-dev \
+    unzip \
+    vim \
+    procps \
+    python3 \
+    python3-pip \
+    python3-dev \
+    python3-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+# 2. 安装 Node.js 和 Npx (通过 NodeSource)
+RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
+    && apt-get install -y nodejs \
+    && npm install -g npm@latest \
+    && rm -rf /var/lib/apt/lists/*
+
+# 3. 配置 Python 别名与基础库
+RUN ln -s /usr/bin/python3 /usr/bin/python \
+    && pip install --no-cache-dir --upgrade pip setuptools wheel
+
+# 4. 迁移项目核心 Python 依赖
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
+
+# 5. 环境变量配置
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+ENV PYTHONUNBUFFERED=1
+
+# 默认启动 Shell
+CMD ["/bin/bash"]
