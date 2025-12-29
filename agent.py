@@ -40,7 +40,7 @@ class AliceAgent:
         self._refresh_system_message()
 
     def _ensure_docker_environment(self):
-        """确保 Docker 环境就绪，并启动常驻容器"""
+        """确保 Docker 环境就绪，实现全自动初始化与唤醒"""
         try:
             # 1. 检查 Docker 引擎
             res = subprocess.run("docker --version", shell=True, capture_output=True)
@@ -48,12 +48,22 @@ class AliceAgent:
                 print("错误: 系统未检测到 Docker。Alice 需要 Docker 环境来确保执行安全与持久化。")
                 sys.exit(1)
             
-            # 2. 检查镜像
+            # 2. 检查并自动构建镜像
             res = subprocess.run(f"docker image inspect {self.docker_image}", shell=True, capture_output=True)
             if res.returncode != 0:
-                print(f"警告: 未找到 Docker 镜像 {self.docker_image}。")
-                print(f"请在终端执行: docker build -t {self.docker_image} -f Dockerfile.sandbox .")
-                return
+                print(f"[系统]: 未找到 Docker 镜像 {self.docker_image}，正在启动全自动构建流程...")
+                print(f"[系统]: 这可能需要几分钟，请稍候...")
+                build_cmd = f"docker build -t {self.docker_image} -f Dockerfile.sandbox ."
+                # 实时输出构建进度
+                process = subprocess.Popen(build_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                for line in process.stdout:
+                    print(f"  [Docker Build]: {line.strip()}")
+                process.wait()
+                
+                if process.returncode != 0:
+                    print(f"错误: Docker 镜像构建失败。请检查 Dockerfile.sandbox 或网络连接。")
+                    sys.exit(1)
+                print(f"[系统]: 镜像 {self.docker_image} 构建成功。")
 
             # 3. 检查/启动常驻容器
             res = subprocess.run(f"docker ps -a --filter name={self.container_name} --format '{{{{.Status}}}}'", shell=True, capture_output=True, text=True)
@@ -61,16 +71,18 @@ class AliceAgent:
 
             if not status:
                 # 容器不存在，创建并启动
-                print(f"[系统]: 正在启动 Alice 常驻实验室容器...")
+                print(f"[系统]: 正在初始化 Alice 常驻实验室容器...")
                 start_cmd = [
                     "docker", "run", "-d",
                     "--name", self.container_name,
+                    "--restart", "always", # 确保系统重启后容器自动启动
                     "-v", f"{self.project_root}:/app",
                     "-w", "/app",
                     self.docker_image,
                     "tail", "-f", "/dev/null" # 保持运行
                 ]
                 subprocess.run(" ".join(start_cmd), shell=True, check=True)
+                print(f"[系统]: 容器已成功初始化并设置为开机自启。")
             elif "up" not in status:
                 # 容器存在但没运行，启动它
                 print(f"[系统]: 正在唤醒 Alice 常驻实验室容器...")
