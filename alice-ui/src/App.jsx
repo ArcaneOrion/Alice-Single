@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, memo } from 'react';
 import axios from 'axios';
 import { Send, Bot, User, ChevronDown, ChevronUp, ScrollText, Library, Terminal, FileText, Download, ExternalLink, Code2, AlertCircle, CheckCircle2, FolderOpen, Folder } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
@@ -10,7 +10,7 @@ function cn(...inputs) {
 }
 
 // 自定义代码块组件
-const CodeBlock = ({ children, className }) => {
+const CodeBlock = memo(({ children, className }) => {
   const [isOpen, setIsOpen] = useState(false);
   const lang = className ? className.replace('language-', '') : 'code';
   
@@ -33,10 +33,10 @@ const CodeBlock = ({ children, className }) => {
       </div>
     </details>
   );
-};
+});
 
 // 递归文件项组件
-const FileTreeItem = ({ item, depth = 0 }) => {
+const FileTreeItem = memo(({ item, depth = 0 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const isDir = item.type === 'directory';
 
@@ -126,11 +126,42 @@ const FileTreeItem = ({ item, depth = 0 }) => {
       )}
     </div>
   );
-};
+});
+
+// 输入区域组件，用于隔离渲染压力
+const ChatInput = memo(({ onSend, isLoading }) => {
+  const [input, setInput] = useState('');
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!input.trim() || isLoading) return;
+    onSend(input);
+    setInput('');
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="max-w-4xl mx-auto relative group">
+      <input
+        type="text"
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        placeholder={isLoading ? "Alice 正在全神贯注思考中..." : "问问 Alice，或要求她执行任务..."}
+        disabled={isLoading}
+        className="w-full pl-5 pr-14 py-4 bg-gray-900 border border-gray-800 rounded-2xl focus:outline-none focus:ring-4 focus:ring-indigo-500/5 focus:border-indigo-500 focus:bg-gray-900 transition-all disabled:bg-gray-950 disabled:text-gray-600 text-gray-100 shadow-inner"
+      />
+      <button
+        type="submit"
+        disabled={isLoading || !input.trim()}
+        className="absolute right-2.5 top-2.5 bg-indigo-600 text-white p-2.5 rounded-xl hover:bg-indigo-700 transition-all disabled:bg-gray-800 shadow-none active:scale-95"
+      >
+        <Send size={20} />
+      </button>
+    </form>
+  );
+});
 
 function App() {
   const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [tasks, setTasks] = useState('');
   const [skills, setSkills] = useState({});
@@ -186,13 +217,9 @@ function App() {
     }
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!input.trim() || isLoading) return;
-
-    const userMessage = { role: 'user', content: input };
+  const handleSendMessage = async (text) => {
+    const userMessage = { role: 'user', content: text };
     setMessages((prev) => [...prev, userMessage]);
-    setInput('');
     setIsLoading(true);
 
     let currentBotMessage = { role: 'bot', steps: [], finalAnswer: '', isComplete: false };
@@ -202,7 +229,7 @@ function App() {
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: input }),
+        body: JSON.stringify({ message: text }),
       });
 
       const reader = response.body.getReader();
@@ -273,7 +300,7 @@ function App() {
               <ScrollText size={16} className="text-indigo-400" />
               <span>任务清单 (Todo)</span>
             </div>
-            <div className="bg-indigo-900/10 rounded-xl p-4 text-sm text-gray-300 whitespace-pre-wrap border border-indigo-900/20 max-h-48 overflow-y-auto">
+            <div className="bg-indigo-900/10 rounded-xl p-4 text-sm text-gray-300 whitespace-pre-wrap border border-indigo-900/20 max-h-48 overflow-y-auto font-mono">
               {tasks || '暂无活跃任务'}
             </div>
           </section>
@@ -334,7 +361,7 @@ function App() {
           {messages.length === 0 && (
               <div className="h-full flex flex-col items-center justify-center text-gray-600 space-y-4">
                   <Bot size={48} className="text-gray-800" />
-                  <p className="text-sm font-medium">今天有什么我可以帮你的吗？</p>
+                  <p className="text-sm font-medium font-mono">今天有什么我可以帮你的吗？</p>
               </div>
           )}
           {messages.map((msg, i) => (
@@ -434,23 +461,7 @@ function App() {
           <div ref={chatEndRef} />
         </div>
         <div className="p-6 bg-gray-950/80 backdrop-blur-md border-t border-gray-800">
-          <form onSubmit={handleSubmit} className="max-w-4xl mx-auto relative group">
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder={isLoading ? "Alice 正在全神贯注思考中..." : "问问 Alice，或要求她执行任务..."}
-              disabled={isLoading}
-              className="w-full pl-5 pr-14 py-4 bg-gray-900 border border-gray-800 rounded-2xl focus:outline-none focus:ring-4 focus:ring-indigo-500/5 focus:border-indigo-500 focus:bg-gray-900 transition-all disabled:bg-gray-950 disabled:text-gray-600 text-gray-100 shadow-inner"
-            />
-            <button
-              type="submit"
-              disabled={isLoading || !input.trim()}
-              className="absolute right-2.5 top-2.5 bg-indigo-600 text-white p-2.5 rounded-xl hover:bg-indigo-700 transition-all disabled:bg-gray-800 shadow-none active:scale-95"
-            >
-              <Send size={20} />
-            </button>
-          </form>
+          <ChatInput onSend={handleSendMessage} isLoading={isLoading} />
         </div>
       </div>
     </div>
