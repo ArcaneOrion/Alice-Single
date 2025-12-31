@@ -11,4 +11,5 @@ alice-ui/.vite/
 .clinerules
 
 memory/*.json
+*.log
 
