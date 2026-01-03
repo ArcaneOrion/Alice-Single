@@ -8,11 +8,10 @@ Alice 是一个基于 ReAct 模式的智能体框架，具备分级记忆管理�
 
 ## 1. 技术架构
 
-项目采用“宿主机核心 + 容器化沙盒”的隔离架构，确保执行环境的安全性和可复现性。
+项目采用“宿主机核心 + 容器化沙盒”的隔离架构，确保执行环境的安全性和可复现性。本项目为纯终端交互模式。
 
 ### 1.1 核心技术栈
-- **后端**: Python 3.8+, FastAPI, Uvicorn, OpenAI API (compatible), Docker
-- **前端**: React 18, Vite, Tailwind CSS, Lucide React, SSE (Server-Sent Events)
+- **核心**: Python 3.8+, OpenAI API (compatible), Docker
 - **沙盒**: Ubuntu 24.04 (Docker), Python 虚拟环境, Node.js 环境
 
 ### 1.2 状态管理与记忆系统
@@ -40,6 +39,7 @@ Alice 是一个基于 ReAct 模式的智能体框架，具备分级记忆管理�
 | `toolkit` | `list` / `info <name>` / `refresh` | 管理技能注册表。`refresh` 用于重新扫描 `skills/` 目录 |
 | `memory` | `"内容"` [`--ltm`] | 默认更新 STM。若带 `--ltm` 则追加至 LTM 的“经验教训”小节 |
 | `update_prompt` | `"新的人设内容"` | 热更新 `prompts/alice.md` 系统提示词 |
+| `todo` | `"任务列表内容"` | 更新任务清单 |
 
 ---
 
@@ -49,14 +49,12 @@ Alice 是一个基于 ReAct 模式的智能体框架，具备分级记忆管理�
 .
 ├── agent.py                # 核心逻辑：状态机管理、指令拦截与隔离调度
 ├── snapshot_manager.py     # 资产索引：技能自动发现与快照生成
-├── api_server.py           # 后端接口：FastAPI 驱动的 SSE 流式响应服务
 ├── main.py                 # 交互入口：CLI 模式下的对话循环
 ├── config.py               # 配置管理：环境变量解析与路径定义
 ├── .env.example            # 配置模板：环境变量示例文件
 ├── Dockerfile.sandbox      # 沙盒环境：基于 Ubuntu 24.04 的 Python/Node 运行环境
-├── requirements.txt        # 容器依赖：基础镜像构建所需的 Python 库 (Pandas, Matplotlib 等)
+├── requirements.txt        # 容器依赖：基础镜像构建所需的 Python 库
 ├── alice_output/           # 输出目录：存储任务执行过程中的生成文件（已挂载）
-├── alice-ui/               # 前端项目：基于 Vite + React 的 Web 交互界面
 ├── prompts/                # 指令目录：存放系统提示词 (alice.md)
 ├── memory/                 # 状态目录：存放分级记忆文件
 │   ├── alice_memory.md     # 长期记忆 (LTM)
@@ -76,12 +74,11 @@ Alice 是一个基于 ReAct 模式的智能体框架，具备分级记忆管理�
 ## 4. 快速开始
 
 ### 4.1 通用配置
-1. **基础环境**: 确保已安装 **Python 3.8+** 和 **Docker**。若需使用 Web 模式，还需安装 **Node.js**。
-2. **API 密钥**: 参考 `.env.example` 创建 `.env` 文件，并填写必要的 API Key（还可用iflow的qwen3-max）。
+1. **基础环境**: 确保已安装 **Python 3.8+** 和 **Docker**。
+2. **API 密钥**: 参考 `.env.example` 创建 `.env` 文件，并填写必要的 API Key。
 
 ### 4.2 运行模式
 
-#### A. 终端模式 (CLI)
 适用于直接在命令行与智能体交互：
 ```bash
 # 1. 安装核心依赖
@@ -90,29 +87,6 @@ pip install openai python-dotenv
 # 2. 启动对话循环
 python main.py
 ```
-
-#### B. Web UI 模式
-适用于通过浏览器界面进行交互：
-
-**第一步：启动后端 (API Server)**
-```bash
-# 1. 安装后端依赖 (建议使用虚拟环境)
-pip install openai python-dotenv fastapi uvicorn anyio
-
-# 2. 启动服务 (默认端口 8000)
-python api_server.py
-```
-
-**第二步：启动前端 (Vite + React)**
-```bash
-# 1. 进入前端目录并安装依赖
-cd alice-ui
-npm install
-
-# 2. 启动开发服务器 (默认端口 5173)
-npm run dev
-```
-访问地址: `http://localhost:5173`
 
 ### 4.3 技能扩展流程
 1. 在 `skills/` 目录下创建子目录。
