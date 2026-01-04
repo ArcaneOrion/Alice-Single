@@ -14,6 +14,7 @@ class AliceAgent:
         self.memory_path = config.MEMORY_FILE_PATH
         self.todo_path = config.TODO_FILE_PATH
         self.stm_path = config.SHORT_TERM_MEMORY_FILE_PATH
+        self.working_memory_path = config.WORKING_MEMORY_FILE_PATH
         self.client = OpenAI(
             base_url=config.BASE_URL,
             api_key=config.API_KEY
@@ -99,10 +100,11 @@ class AliceAgent:
             sys.exit(1)
 
     def _refresh_system_message(self):
-        """刷新系统消息，注入最新的提示词、长期记忆、短期记忆、任务清单和文件索引快照"""
+        """刷新系统消息，注入最新的提示词、长期记忆、短期记忆、即时记忆、任务清单和文件索引快照"""
         self.system_prompt = self._load_prompt()
         self.memory_content = self._load_file_content(self.memory_path, "暂无长期记忆。")
         self.stm_content = self._load_file_content(self.stm_path, "暂无近期记忆。")
+        self.working_memory_content = self._load_file_content(self.working_memory_path, "暂无即时对话背景。")
         self.todo_content = self._load_file_content(self.todo_path, "暂无活跃任务。")
         self.snapshot_mgr.refresh() # 刷新快照
         self.index_text = self.snapshot_mgr.get_index_text()
@@ -130,6 +132,7 @@ class AliceAgent:
             f"{self.system_prompt}\n\n"
             f"### 你的长期记忆 (来自 {self.memory_path})\n{self.memory_content}\n\n"
             f"### 你的短期记忆 (最近 7 天，来自 {self.stm_path})\n{self.stm_content}\n\n"
+            f"### 你的即时对话背景 (最近几轮对话，来自 {self.working_memory_path})\n{self.working_memory_content}\n\n"
             f"### 你的当前任务清单 (来自 {self.todo_path})\n{self.todo_content}\n\n"
             f"### 核心资产索引快照\n{self.index_text}"
         )
@@ -283,6 +286,55 @@ class AliceAgent:
             return "已成功更新宿主机任务清单 (memory/todo.md)。"
         except Exception as e:
             return f"更新任务清单失败: {str(e)}"
+
+    def _update_working_memory(self, user_text, assistant_thinking, assistant_content):
+        """更新即时记忆 (Working Memory)，过滤掉代码块，保持最近 N 轮"""
+        def filter_code(text):
+            if not text: return ""
+            # 移除所有代码块
+            return re.sub(r'```[\s\S]*?```', '', text).strip()
+
+        clean_user = filter_code(user_text)
+        clean_thinking = filter_code(assistant_thinking)
+        clean_content = filter_code(assistant_content)
+
+        if not clean_user and not clean_content and not clean_thinking:
+            return
+
+        new_entry = f"--- ROUND ---\n"
+        if clean_user:
+            new_entry += f"USER: {clean_user}\n"
+        if clean_thinking:
+            new_entry += f"ALICE_THINKING: {clean_thinking}\n"
+        if clean_content:
+            new_entry += f"ALICE_RESPONSE: {clean_content}\n"
+        
+        try:
+            os.makedirs(os.path.dirname(self.working_memory_path), exist_ok=True)
+            content = ""
+            if os.path.exists(self.working_memory_path):
+                with open(self.working_memory_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+            
+            # 分割现有的轮次
+            rounds = re.split(r'^--- ROUND ---\n', content, flags=re.MULTILINE)
+            rounds = [r.strip() for r in rounds if r.strip()]
+            
+            rounds.append(new_entry.replace("--- ROUND ---\n", "").strip())
+            
+            # 保持轮数限制
+            max_rounds = config.WORKING_MEMORY_MAX_ROUNDS
+            if len(rounds) > max_rounds:
+                rounds = rounds[-max_rounds:]
+            
+            final_content = "# Alice 的即时对话背景 (Working Memory)\n\n"
+            for r in rounds:
+                final_content += f"--- ROUND ---\n{r}\n\n"
+            
+            with open(self.working_memory_path, 'w', encoding='utf-8') as f:
+                f.write(final_content)
+        except Exception as e:
+            print(f"更新即时记忆失败: {e}")
 
     def handle_memory(self, content, target="stm"):
         """处理内置 memory 指令，确保写入宿主机 memory/ 目录"""
