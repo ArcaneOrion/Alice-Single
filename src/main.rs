@@ -303,7 +303,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                             app.send_message();
                         }
                         KeyCode::Esc => {
-                            app.should_quit = true;
+                            // Esc 现在用于中断当前对话/任务，而不是退出
+                            if app.status != AgentStatus::Idle {
+                                if let Some(stdin) = &mut app.child_stdin {
+                                    let mut writer = &stdin.0;
+                                    let _ = writeln!(writer, "__INTERRUPT__");
+                                }
+                            }
                         }
                         KeyCode::Up => {
                             // 键盘 Up 逻辑：如果有侧边栏，优先滚动侧边栏，除非用户正在输入

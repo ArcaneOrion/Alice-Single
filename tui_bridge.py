@@ -4,6 +4,8 @@ import io
 import os
 import logging
 import traceback
+import threading
+import queue
 from agent import AliceAgent
 
 # 配置桥接层日志
@@ -127,8 +129,26 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 # 强制 stdout 使用 utf-8 编码，并禁用 buffering 以便实时传输 JSON
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', line_buffering=True)
 
+# 异步输入队列与监听线程
+input_queue = queue.Queue()
+
+def stdin_reader():
+    """专门负责监听宿主机输入的线程，防止阻塞主逻辑"""
+    while True:
+        try:
+            line = sys.stdin.readline()
+            if not line:
+                input_queue.put(None) # EOF 信号
+                break
+            input_queue.put(line.strip())
+        except Exception:
+            break
+
 def main():
     logger.info("TUI Bridge 进程启动。")
+    # 启动监听线程
+    threading.Thread(target=stdin_reader, daemon=True).start()
+
     try:
         alice = AliceAgent()
     except Exception as e:
@@ -142,13 +162,13 @@ def main():
 
     while True:
         try:
-            line = sys.stdin.readline()
-            if not line:
+            # 从异步队列获取输入
+            user_input = input_queue.get()
+            if user_input is None:
                 logger.info("接收到 EOF，退出主循环。")
                 break
             
-            user_input = line.strip()
-            if not user_input:
+            if not user_input or user_input == "__INTERRUPT__":
                 continue
             
             logger.info(f"收到 TUI 输入: {user_input}")
@@ -176,6 +196,16 @@ def main():
                 usage = None
                 
                 for chunk in response:
+                    # 实时检查中断信号
+                    while not input_queue.empty():
+                        msg = input_queue.get_nowait()
+                        if msg == "__INTERRUPT__":
+                            logger.info("检测到中断信号，正在停止输出...")
+                            alice.interrupted = True
+                    
+                    if alice.interrupted:
+                        break
+
                     # 获取 Token 使用情况
                     if hasattr(chunk, 'usage') and chunk.usage:
                         usage = chunk.usage
@@ -218,10 +248,14 @@ def main():
                 # 更新即时记忆 (过滤代码块)
                 alice._update_working_memory(user_input, thinking_content, full_content)
 
+                if alice.interrupted:
+                    logger.info("由于用户中断，跳过后续步骤。")
+                    alice.interrupted = False # 重置状态
+                    print(json.dumps({"type": "status", "content": "done"}), flush=True)
+                    break
+
                 if not python_codes and not bash_commands:
                     logger.info("回复完成，未检测到工具调用。")
-                    # 过滤掉 full_content 中的代码块再存入 messages，防止 UI 重复渲染（或者保持完整，UI 渲染时再处理）
-                    # 这里保持消息完整性，但 UI 由于我们上面分流发送，已经实现了“代码块在侧边栏”的效果
                     alice.messages.append({"role": "assistant", "content": full_content})
                     print(json.dumps({"type": "status", "content": "done"}), flush=True)
                     break
@@ -234,13 +268,21 @@ def main():
 
                 # 捕获工具执行过程中的 print，防止污染 stdout
                 for code in python_codes:
+                    if alice.interrupted: break
                     res = alice.execute_command(code.strip(), is_python_code=True)
                     results.append(f"Python 代码执行结果:\n{res}")
                 
                 for cmd in bash_commands:
+                    if alice.interrupted: break
                     res = alice.execute_command(cmd.strip(), is_python_code=False)
                     results.append(f"Shell 命令 `{cmd.strip()}` 的结果:\n{res}")
                 
+                if alice.interrupted:
+                    logger.info("工具执行阶段被中断。")
+                    alice.interrupted = False
+                    print(json.dumps({"type": "status", "content": "done"}), flush=True)
+                    break
+
                 feedback = "\n\n".join(results)
                 alice.messages.append({"role": "user", "content": f"容器执行反馈：\n{feedback}"})
                 alice._refresh_context()

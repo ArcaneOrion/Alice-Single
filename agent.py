@@ -540,6 +540,9 @@ class AliceAgent:
             print(f"\n{'='*20} Alice 正在思考 ({self.model_name}) {'='*20}")
             
             for chunk in response:
+                if self.interrupted:
+                    logger.info("检测到中断信号，停止生成。")
+                    break
                 if chunk.choices:
                     delta = chunk.choices[0].delta
                     # 容错处理：确保字段存在且不为 None，防止拼接异常或截断
@@ -571,13 +574,19 @@ class AliceAgent:
             results = []
             
             for code in python_codes:
+                if self.interrupted: break
                 res = self.execute_command(code.strip(), is_python_code=True)
                 results.append(f"Python 代码执行结果:\n{res}")
             
             for cmd in bash_commands:
+                if self.interrupted: break
                 res = self.execute_command(cmd.strip(), is_python_code=False)
                 results.append(f"Shell 命令 `{cmd.strip()}` 的结果:\n{res}")
             
+            if self.interrupted:
+                self.interrupted = False
+                break
+
             feedback = "\n\n".join(results)
             self.messages.append({"role": "user", "content": f"容器执行反馈：\n{feedback}"})
             
