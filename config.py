@@ -34,7 +34,7 @@ SHORT_TERM_MEMORY_FILE_PATH = "memory/short_term_memory.md"
 
 # 即时记忆路径 (Working Memory)
 WORKING_MEMORY_FILE_PATH = "memory/working_memory.md"
-WORKING_MEMORY_MAX_ROUNDS = int(get_env_var("WORKING_MEMORY_MAX_ROUNDS", 5))
+WORKING_MEMORY_MAX_ROUNDS = int(get_env_var("WORKING_MEMORY_MAX_ROUNDS", 8))
 
 # 输出目录
 ALICE_OUTPUT_DIR = "alice_output"

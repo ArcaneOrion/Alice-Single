@@ -13,9 +13,9 @@ Alice 是一个基于 ReAct 模式的智能体框架，采用 **Rust TUI** 作�
 项目采用“Rust 终端界面 + Python 核心引擎 + 容器化沙盒”的三层隔离架构。
 
 ### 1.1 核心技术栈
-- **用户界面 (TUI)**: Rust (Ratatui), 提供流畅的终端交互、实时思考过程显示及自动滚动历史。
-- **逻辑引擎 (Engine)**: Python 3.8+, OpenAI API (兼容模式), 负责状态机管理、指令拦截与记忆处理。
-- **安全沙盒 (Sandbox)**: Ubuntu 24.04 (Docker), Python 虚拟环境, Node.js 环境, Playwright。
+- **用户界面 (TUI)**: Rust (Ratatui), 提供流畅的终端交互、实时思考过程显示、侧边栏代码展示及自动滚动历史。
+- **逻辑引擎 (Engine)**: Python 3.8+, OpenAI API (兼容模式), 负责状态机管理、指令拦截、多级记忆处理。
+- **安全沙盒 (Sandbox)**: Ubuntu 24.04 (Docker), 提供物理隔离的执行环境，预装 Python 虚拟环境, Node.js, Playwright 等工具。
 
 ### 1.2 物理隔离与挂载策略
 为了保护宿主机安全，Alice 采用严格的物理隔离机制：
@@ -29,83 +29,69 @@ Alice 是一个基于 ReAct 模式的智能体框架，采用 **Rust TUI** 作�
 *   **交互机制**: 宿主机引擎解析 LLM 的指令，仅将具体代码/命令通过 `docker exec` 发送至沙盒执行。
 
 ### 1.3 状态管理与分级记忆
-*   **即时记忆 (Working Memory)**: 存储最近 $N$ 轮对话（默认 5 轮，可配置）。包含用户输入、Alice 的回答及思考过程，但**自动排除代码块**以节省上下文空间。
-*   **短期记忆 (STM)**: 记录近 7 天的完整交互。系统启动时通过 `AliceAgent.manage_memory()` 实现过期内容的滚动清理。
+*   **即时记忆 (Working Memory)**: 存储最近 $N$ 轮对话。包含用户输入、Alice 的回答及思考过程，但**自动排除代码块**以节省上下文空间。
+*   **短期记忆 (STM)**: 记录近 7 天的完整交互。系统启动时会自动提炼（Distill）即将过期的旧记忆。
 *   **长期记忆 (LTM)**: 存储经提炼的高价值知识、偏好与经验教训。
-*   **任务清单 (Todo)**: 存储当前活跃任务，辅助智能体维持长线目标。
-*   **索引快照 (Snapshot)**: `SnapshotManager` 实时扫描 `skills/` 目录，生成文件索引快照注入 LLM 上下文。
+*   **索引快照 (Snapshot)**: `SnapshotManager` 实时扫描项目资产，生成索引快照注入 LLM 上下文，确保 Alice 了解自己的能力边界。
 
 ---
 
-## 2. 内置指令参考
+## 2. 交互快捷键 (TUI)
 
-这些指令由宿主机引擎直接拦截并执行，具有管理项目的最高权限：
-
-| 指令 | 参数示例 | 描述 |
-| :--- | :--- | :--- |
-| `toolkit` | `list` / `info <name>` / `refresh` | 管理技能注册表。`refresh` 用于重新扫描 `skills/` 目录 |
-| `memory` | `"内容"` [`--ltm`] | 更新记忆。带 `--ltm` 追加至 LTM，否则更新 STM |
-| `update_prompt` | `"新的人设内容"` | 热更新 `prompts/alice.md` 系统提示词 |
-| `todo` | `"任务列表内容"` | 更新任务清单 `memory/todo.md` |
+| 快捷键 | 动作 |
+| :--- | :--- |
+| **Enter** | 发送当前输入的消息 |
+| **Esc** | **中断/停止** 当前正在进行的思考、回复或工具执行任务 |
+| **Ctrl + O** | 切换显示/隐藏侧边栏（思考过程与代码区） |
+| **Ctrl + C** | 强制退出程序 |
+| **Up / Down** | 在对话历史中手动滚动（禁用自动滚动） |
 
 ---
 
-## 3. 项目结构
+## 3. 内置指令参考
+
+这些指令由宿主机引擎直接拦截并执行：
+
+| 指令 | 描述 |
+| :--- | :--- |
+| `toolkit list/refresh` | 管理技能注册表。`refresh` 用于发现 `skills/` 下的新技能 |
+| `memory "内容" [--ltm]` | 手动更新记忆。带 `--ltm` 会永久存入 LTM 经验教训区 |
+| `update_prompt "新内容"` | 动态更新 `prompts/alice.md` 系统人设 |
+| `todo "任务清单"` | 更新 `memory/todo.md` 任务追踪 |
+
+---
+
+## 4. 项目结构
 
 ```text
 .
-├── src/                    # Rust TUI 源代码 (Ratatui)
+├── src/                    # Rust TUI 源代码 (基于 Ratatui)
 ├── Cargo.toml              # Rust 项目配置文件
-├── agent.py                # Python 核心逻辑：状态机、指令拦截与隔离调度
-├── tui_bridge.py           # 桥接层：负责 Rust TUI 与 Python Engine 的 JSON 通信
-├── main.py                 # CLI 模式入口 (传统的纯终端对话)
-├── snapshot_manager.py     # 资产索引：技能自动发现与快照生成
-├── Dockerfile.sandbox      # 沙盒镜像定义 (Ubuntu 24.04 + Python + Node)
+├── agent.py                # Python 核心逻辑：状态机、分级记忆与安全隔离调度
+├── tui_bridge.py           # 桥接层：管理 TUI 通信、异步输入及流式处理
+├── snapshot_manager.py     # 快照管理器：技能自动发现与上下文索引生成
+├── Dockerfile.sandbox      # 沙盒镜像定义 (Ubuntu 24.04 + Node + Playwright)
 ├── alice_output/           # 输出目录：存储任务生成的文件 (已挂载)
 ├── prompts/                # 指令目录：存放系统提示词 (alice.md)
-├── memory/                 # 记忆目录：存放分级记忆文件 (LTM/STM/Todo)
-└── skills/                 # 技能库：19+ 内置技能 (已挂载)
-    ├── playwright_browser/ # 网页自动化与爬虫
-    ├── mcp-builder/        # MCP 服务端开发技能
-    ├── artifacts-builder/  # UI 组件与工件构建
-    ├── slack-gif-creator/  # 动态 GIF 生成
-    ├── docx/xlsx/pptx/     # Office 文档处理
-    ├── akshare/tavily/     # 金融数据与高级搜索
-    └── ...                 # 更多技能持续演进中
+├── memory/                 # 记忆目录：存放 LTM/STM/Todo 记录
+└── skills/                 # 技能库：内置 20+ 自动化技能 (已挂载)
 ```
 
 ---
 
-## 4. 快速开始
+## 5. 快速开始
 
-### 4.1 环境准备
+### 5.1 环境准备
 1. **基础依赖**: 安装 **Rust**, **Python 3.8+** 和 **Docker**。
-2. **配置 API**: 参考 `.env.example` 创建 `.env` 文件，填写 OpenAI 兼容的 API Key。
-3. **Docker 权限**: 确保当前用户有执行 `docker` 命令的权限。
+2. **配置 API**: 参考 `.env.example` 创建 `.env` 文件并填入 `API_KEY` 和 `MODEL_NAME`。
+3. **Docker**: 确保 Docker 服务已启动且当前用户有执行权限。
 
-### 4.2 运行 TUI 模式 (推荐)
-提供交互式的终端界面，支持思考过程查看（Ctrl+O）。
+### 5.2 运行方式
 ```bash
-# 启动 TUI 界面
+# 启动 Alice 智能体界面
 cargo run --release
 ```
-
-### 4.3 运行 CLI 模式
-传统的逐行对话模式。
-```bash
-# 安装 Python 依赖
-pip install -r requirements.txt
-# 启动对话
-python main.py
-```
-
----
-
-## 5. 安全与自演进
-
-*   **指令审查**: 拦截危险指令（如 `rm`），防止沙盒内意外删除。
-*   **最小权限**: 容器以非特权模式常驻运行，仅允许访问特定挂载目录。
-*   **技能自主开发**: Alice 具备在沙盒内编写、测试并注册新技能的能力。现有的多项技能（如 `weather`, `weibo`）均由 Alice 独立编写并动态集成。
+首次运行会自动构建 Docker 沙盒镜像并初始化工作环境。
 
 ---
 
