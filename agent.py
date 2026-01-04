@@ -542,14 +542,16 @@ class AliceAgent:
             for chunk in response:
                 if chunk.choices:
                     delta = chunk.choices[0].delta
-                    t_chunk = getattr(delta, 'reasoning_content', '')
-                    c_chunk = getattr(delta, 'content', '')
+                    # 容错处理：确保字段存在且不为 None，防止拼接异常或截断
+                    t_chunk = getattr(delta, 'reasoning_content', '') or ""
+                    c_chunk = getattr(delta, 'content', '') or ""
                     
                     if t_chunk:
                         logger.debug(f"Thinking Chunk: {t_chunk}")
                         print(t_chunk, end='', flush=True)
                         thinking_content += t_chunk
-                    elif c_chunk:
+                    
+                    if c_chunk: # 移除 elif，防止同一 chunk 中包含两种内容时丢失正文首字
                         logger.debug(f"Content Chunk: {c_chunk}")
                         if not done_thinking:
                             print('\n\n' + "="*20 + " Alice 的回答 " + "="*20 + '\n')
