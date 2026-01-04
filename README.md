@@ -17,23 +17,6 @@ Alice 是一个基于 ReAct 模式的智能体框架，采用 **Rust TUI** 作�
 - **逻辑引擎 (Engine)**: Python 3.8+, OpenAI API (兼容模式), 负责状态机管理、指令拦截、多级记忆处理。
 - **安全沙盒 (Sandbox)**: Ubuntu 24.04 (Docker), 提供物理隔离的执行环境，预装 Python 虚拟环境, Node.js, Playwright 等工具。
 
-### 1.2 物理隔离与挂载策略
-为了保护宿主机安全，Alice 采用严格的物理隔离机制：
-*   **挂载项 (容器可见)**:
-    - `skills/` -> `/app/skills`: 存放可执行脚本（读写）。
-    - `alice_output/` -> `/app/alice_output`: 存放任务产出物（读写）。
-*   **非挂载项 (宿主机私有)**:
-    - `.env`: 包含敏感 API Key。
-    - `agent.py` / `tui_bridge.py`: 核心控制逻辑。
-    - `memory/` / `prompts/`: 长期记忆、短期记忆及系统提示词。
-*   **交互机制**: 宿主机引擎解析 LLM 的指令，仅将具体代码/命令通过 `docker exec` 发送至沙盒执行。
-
-### 1.3 状态管理与分级记忆
-*   **即时记忆 (Working Memory)**: 存储最近 $N$ 轮对话。包含用户输入、Alice 的回答及思考过程，但**自动排除代码块**以节省上下文空间。
-*   **短期记忆 (STM)**: 记录近 7 天的完整交互。系统启动时会自动提炼（Distill）即将过期的旧记忆。
-*   **长期记忆 (LTM)**: 存储经提炼的高价值知识、偏好与经验教训。
-*   **索引快照 (Snapshot)**: `SnapshotManager` 实时扫描项目资产，生成索引快照注入 LLM 上下文，确保 Alice 了解自己的能力边界。
-
 ---
 
 ## 2. 交互快捷键 (TUI)
@@ -48,7 +31,63 @@ Alice 是一个基于 ReAct 模式的智能体框架，采用 **Rust TUI** 作�
 
 ---
 
-## 3. 内置指令参考
+## 3. 部署与快速开始
+
+Alice 的环境分为 **宿主机** 和 **沙盒容器** 两部分。
+
+### 3.1 环境依赖
+
+#### 宿主机 (Host) 依赖
+这是运行 Alice 控制台所必须的环境：
+1.  **Docker**: 必须安装并启动，且当前用户需具备执行权限。用于运行任务沙盒。
+2.  **Python 3.8+**: 用于运行逻辑桥接层。
+3.  **Rust 编译环境**: 项目基于 Rust 开发，你需要确保系统中安装了 Rust 工具链（Cargo）。
+
+#### 容器 (Container) 依赖
+这是 Alice 执行具体任务（如爬虫、绘图）的环境：
+-   **requirements.txt**: 记录了容器内部的 Python 依赖（如 `pandas`, `playwright`, `matplotlib` 等）。
+-   **自动处理**: 用户**无需**在宿主机手动安装 `requirements.txt` 中的包，Alice 会在首次运行时自动构建 Docker 镜像并完成安装。
+
+### 3.2 部署步骤
+
+1.  **克隆项目**:
+    ```bash
+    git clone https://github.com/Arcanexis/Alice.git
+    cd Alice
+    ```
+
+2.  **创建并激活 Python 虚拟环境** (推荐):
+    ```bash
+    # 创建虚拟环境
+    python -m venv venv
+    
+    # 激活虚拟环境 (Linux/macOS)
+    source venv/bin/activate
+    # 激活虚拟环境 (Windows)
+    # venv\Scripts\activate
+    ```
+
+3.  **安装宿主机 Python 核心包**:
+    ```bash
+    pip install openai python-dotenv
+    ```
+
+4.  **配置环境变量**:
+    参考 `.env.example` 创建 `.env` 文件：
+    ```bash
+    cp .env.example .env
+    ```
+    编辑 `.env`，填入你的 `API_KEY` 和 `MODEL_NAME`。
+
+5.  **启动 Alice**:
+    ```bash
+    cargo run --release
+    ```
+    *注：首次运行会触发 `docker build`，根据网络情况可能需要几分钟。*
+
+---
+
+## 4. 内置指令参考
 
 这些指令由宿主机引擎直接拦截并执行：
 
@@ -61,7 +100,7 @@ Alice 是一个基于 ReAct 模式的智能体框架，采用 **Rust TUI** 作�
 
 ---
 
-## 4. 项目结构
+## 5. 项目结构
 
 ```text
 .
@@ -71,27 +110,12 @@ Alice 是一个基于 ReAct 模式的智能体框架，采用 **Rust TUI** 作�
 ├── tui_bridge.py           # 桥接层：管理 TUI 通信、异步输入及流式处理
 ├── snapshot_manager.py     # 快照管理器：技能自动发现与上下文索引生成
 ├── Dockerfile.sandbox      # 沙盒镜像定义 (Ubuntu 24.04 + Node + Playwright)
+├── requirements.txt        # 容器沙盒专用 Python 依赖清单
 ├── alice_output/           # 输出目录：存储任务生成的文件 (已挂载)
 ├── prompts/                # 指令目录：存放系统提示词 (alice.md)
 ├── memory/                 # 记忆目录：存放 LTM/STM/Todo 记录
 └── skills/                 # 技能库：内置 20+ 自动化技能 (已挂载)
 ```
-
----
-
-## 5. 快速开始
-
-### 5.1 环境准备
-1. **基础依赖**: 安装 **Rust**, **Python 3.8+** 和 **Docker**。
-2. **配置 API**: 参考 `.env.example` 创建 `.env` 文件并填入 `API_KEY` 和 `MODEL_NAME`。
-3. **Docker**: 确保 Docker 服务已启动且当前用户有执行权限。
-
-### 5.2 运行方式
-```bash
-# 启动 Alice 智能体界面
-cargo run --release
-```
-首次运行会自动构建 Docker 沙盒镜像并初始化工作环境。
 
 ---
 
