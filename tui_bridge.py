@@ -49,9 +49,20 @@ def main():
 
                 # 状态机，用于识别代码块并实现重定向
                 in_code_block = False
+                usage = None
                 pending_buffer = "" # 用于处理可能跨 chunk 的 ``` 标记
                 
                 for chunk in response:
+                    # 获取 Token 使用情况 (通常在最后一个 chunk)
+                    if hasattr(chunk, 'usage') and chunk.usage:
+                        usage = chunk.usage
+                        print(json.dumps({
+                            "type": "tokens",
+                            "total": usage.total_tokens,
+                            "prompt": usage.prompt_tokens,
+                            "completion": usage.completion_tokens
+                        }), flush=True)
+
                     if chunk.choices:
                         delta = chunk.choices[0].delta
                         t_chunk = getattr(delta, 'reasoning_content', '')

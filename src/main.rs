@@ -29,6 +29,7 @@ enum BridgeMessage {
     Status { content: String },
     Thinking { content: String },
     Content { content: String },
+    Tokens { total: usize, prompt: usize, completion: usize },
     Error { content: String },
 }
 
@@ -67,7 +68,15 @@ struct App {
     spinner_index: usize,
     scroll_offset: usize,
     auto_scroll: bool,
+    thinking_scroll_offset: usize,
+    thinking_auto_scroll: bool,
+    total_tokens: usize,
+    prompt_tokens: usize,
+    completion_tokens: usize,
     list_state: ListState,
+    // 区域记录，用于鼠标碰撞检测
+    chat_area: Rect,
+    sidebar_area: Rect,
     // 子进程标准输入，用于发送用户消息
     child_stdin: Option<ChildStdinWrapper>,
 }
@@ -90,7 +99,14 @@ impl App {
             spinner_index: 0,
             scroll_offset: 0,
             auto_scroll: true,
+            thinking_scroll_offset: 0,
+            thinking_auto_scroll: true,
+            total_tokens: 0,
+            prompt_tokens: 0,
+            completion_tokens: 0,
             list_state: ListState::default(),
+            chat_area: Rect::default(),
+            sidebar_area: Rect::default(),
             child_stdin: None,
         }
     }
@@ -245,6 +261,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                         }
                     }
                 }
+                BridgeMessage::Tokens { total, prompt, completion } => {
+                    app.total_tokens = total;
+                    app.prompt_tokens = prompt;
+                    app.completion_tokens = completion;
+                }
                 BridgeMessage::Error { content } => {
                     if content.contains("Backend Error") {
                         app.messages.push(Message {
@@ -293,23 +314,51 @@ fn main() -> Result<(), Box<dyn Error>> {
                             app.should_quit = true;
                         }
                         KeyCode::Up => {
-                            app.auto_scroll = false;
-                            if app.scroll_offset > 0 { app.scroll_offset -= 1; }
+                            // 键盘 Up 逻辑：如果有侧边栏，优先滚动侧边栏，除非用户正在输入
+                            if app.show_thinking {
+                                app.thinking_auto_scroll = false;
+                                if app.thinking_scroll_offset > 0 { app.thinking_scroll_offset -= 1; }
+                            } else {
+                                app.auto_scroll = false;
+                                if app.scroll_offset > 0 { app.scroll_offset -= 1; }
+                            }
                         }
                         KeyCode::Down => {
-                            app.scroll_offset += 1;
+                            if app.show_thinking {
+                                if app.thinking_scroll_offset < 9999 { app.thinking_scroll_offset += 1; }
+                            } else {
+                                app.scroll_offset += 1;
+                            }
                         }
                         _ => {}
                     }
                 }
                 Event::Mouse(mouse) => {
+                    let (x, y) = (mouse.column, mouse.row);
+                    let is_in_sidebar = app.show_thinking && 
+                        x >= app.sidebar_area.x && x < app.sidebar_area.x + app.sidebar_area.width &&
+                        y >= app.sidebar_area.y && y < app.sidebar_area.y + app.sidebar_area.height;
+                    
+                    let is_in_chat = 
+                        x >= app.chat_area.x && x < app.chat_area.x + app.chat_area.width &&
+                        y >= app.chat_area.y && y < app.chat_area.y + app.chat_area.height;
+
                     match mouse.kind {
                         MouseEventKind::ScrollUp => {
-                            app.auto_scroll = false;
-                            if app.scroll_offset > 0 { app.scroll_offset -= 1; }
+                            if is_in_sidebar {
+                                app.thinking_auto_scroll = false;
+                                if app.thinking_scroll_offset > 0 { app.thinking_scroll_offset -= 1; }
+                            } else if is_in_chat {
+                                app.auto_scroll = false;
+                                if app.scroll_offset > 0 { app.scroll_offset -= 1; }
+                            }
                         }
                         MouseEventKind::ScrollDown => {
-                            app.scroll_offset += 1;
+                            if is_in_sidebar {
+                                if app.thinking_scroll_offset < 9999 { app.thinking_scroll_offset += 1; }
+                            } else if is_in_chat {
+                                app.scroll_offset += 1;
+                            }
                         }
                         _ => {}
                     }
@@ -372,12 +421,19 @@ fn ui(f: &mut Frame, app: &mut App) {
 
     let thinking_hint = if app.show_thinking { "显示思考过程 (Ctrl+O 隐藏)" } else { "隐藏思考过程 (Ctrl+O 显示)" };
     
+    let token_info = if app.total_tokens > 0 {
+        format!(" | Context: {} (P: {} / C: {})", app.total_tokens, app.prompt_tokens, app.completion_tokens)
+    } else {
+        "".to_string()
+    };
+
     let header_line = Line::from(vec![
         Span::styled(" ALICE ASSISTANT ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
         Span::raw(" | 状态:"),
         Span::styled(status_text, status_style),
         Span::raw(" | "),
         Span::raw(thinking_hint),
+        Span::styled(token_info, Style::default().fg(Color::DarkGray)),
     ]);
 
     let header = Paragraph::new(header_line)
@@ -402,6 +458,9 @@ fn ui(f: &mut Frame, app: &mut App) {
             ])
             .split(chunks[1])
     };
+
+    app.chat_area = main_chunks[0];
+    app.sidebar_area = main_chunks[1];
 
     render_messages(f, app, main_chunks[0]);
 
@@ -491,7 +550,9 @@ fn render_messages(f: &mut Frame, app: &mut App, area: Rect) {
     f.render_stateful_widget(history, area, &mut app.list_state);
 }
 
-fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {
+fn render_sidebar(f: &mut Frame, app: &mut App, area: Rect) {
+    let width = area.width.saturating_sub(2) as usize;
+    
     // 获取最新的思考过程
     let current_thinking = app.messages.iter().rev()
         .find(|m| !m.thinking.is_empty())
@@ -506,9 +567,35 @@ fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {
 
     let style = Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC);
 
+    // 计算内容行数以实现自动滚动
+    let lines = format_text_to_lines(current_thinking, width);
+    let total_lines = lines.len();
+    let height = area.height.saturating_sub(2) as usize;
+
+    if app.thinking_auto_scroll {
+        if total_lines > height {
+            app.thinking_scroll_offset = total_lines - height;
+        } else {
+            app.thinking_scroll_offset = 0;
+        }
+    } else {
+        // 限制手动滚动范围
+        if total_lines > height {
+            let max_scroll = total_lines - height;
+            if app.thinking_scroll_offset > max_scroll {
+                app.thinking_scroll_offset = max_scroll;
+                app.thinking_auto_scroll = true;
+            }
+        } else {
+            app.thinking_scroll_offset = 0;
+            app.thinking_auto_scroll = true;
+        }
+    }
+
     let thinking_paragraph = Paragraph::new(current_thinking)
         .style(style)
         .wrap(ratatui::widgets::Wrap { trim: true })
+        .scroll((app.thinking_scroll_offset as u16, 0))
         .block(Block::default()
             .title(sidebar_title)
             .borders(Borders::ALL));

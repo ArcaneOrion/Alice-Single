@@ -509,6 +509,7 @@ class AliceAgent:
                 model=self.model_name,
                 messages=self.messages,
                 stream=True,
+                stream_options={"include_usage": True},
                 extra_body=extra_body
             )
 
