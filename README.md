@@ -16,6 +16,16 @@ Alice 是一个基于 ReAct 模式的智能体框架，采用 **Rust TUI** 作�
 
 ---
 
+## 项目状态 / Project Status
+
+Alice-Single 已达到预期的可用状态，目前主要作为个人使用与参考实现进行维护。  
+项目将进入维护阶段，原则上不再进行大规模功能扩展或架构性调整。
+
+Alice-Single has reached its intended usable state and is currently maintained
+primarily for personal use and as a reference implementation.
+The project is now in maintenance mode, with no plans for major feature additions
+or architectural changes.
+
 ## 1. 技术架构
 
 项目采用“Rust 终端界面 + Python 核心引擎 + 容器化沙盒”的三层隔离架构。
@@ -60,7 +70,7 @@ Alice 的环境分为 **宿主机** 和 **沙盒容器** 两部分。
 
 1.  **克隆项目**:
     ```bash
-    git clone https://github.com/Arcanexis/Alice.git
+    git clone https://github.com/ArcaneOrion/Alice-Single.git
     cd Alice
     ```
 
