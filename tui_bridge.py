@@ -211,7 +211,7 @@ def main():
             
             while True:
                 extra_body = {"enable_thinking": True}
-                response = alice.client.chat.completions.create(
+                response = alice._create_chat_completion(
                     model=alice.model_name,
                     messages=alice.messages,
                     stream=True,

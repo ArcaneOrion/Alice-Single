@@ -6,6 +6,7 @@ import logging
 from datetime import datetime, timedelta
 from openai import OpenAI
 import config
+from request_headers import RequestHeaderRotator, load_request_header_profiles
 from snapshot_manager import SnapshotManager
 
 # 配置运行时日志
@@ -30,6 +31,9 @@ class AliceAgent:
         self.client = OpenAI(
             base_url=config.BASE_URL,
             api_key=config.API_KEY
+        )
+        self.request_header_rotator = RequestHeaderRotator(
+            load_request_header_profiles(config.REQUEST_HEADER_PROFILES)
         )
         self.messages = []
         
@@ -233,7 +237,7 @@ class AliceAgent:
                     "请以 Markdown 列表格式输出提炼结果，保持简洁。如果没有值得记录的长期价值，请回复“无重要更新”。"
                 )
                 
-                response = self.client.chat.completions.create(
+                response = self._create_chat_completion(
                     model=self.model_name,
                     messages=[{"role": "user", "content": distill_prompt}]
                 )
@@ -268,6 +272,19 @@ class AliceAgent:
         except Exception as e:
             print(f"加载文件 {path} 失败: {e}")
             return default_msg
+
+    def _create_chat_completion(self, **kwargs):
+        profile_index, extra_headers = self.request_header_rotator.next_profile()
+        user_agent = extra_headers.get("User-Agent", "<unset>")
+        logger.info(
+            "发送 chat.completions 请求，使用 header profile #%s (User-Agent: %s)",
+            profile_index,
+            user_agent,
+        )
+        return self.client.chat.completions.create(
+            extra_headers=extra_headers,
+            **kwargs,
+        )
 
     def handle_update_prompt(self, content):
         """处理内置 update_prompt 指令，在宿主机更新人设文件"""
@@ -536,7 +553,7 @@ class AliceAgent:
         
         while True:
             extra_body = {"enable_thinking": True}
-            response = self.client.chat.completions.create(
+            response = self._create_chat_completion(
                 model=self.model_name,
                 messages=self.messages,
                 stream=True,

@@ -19,6 +19,7 @@ BASE_URL = get_env_var("API_BASE_URL", "https://api-inference.modelscope.cn/v1/"
 
 # 模型配置 (强制要求在 .env 中设置模型名称)
 MODEL_NAME = get_env_var("MODEL_NAME", required=True)
+REQUEST_HEADER_PROFILES = get_env_var("REQUEST_HEADER_PROFILES", "")
 
 # 提示词路径
 DEFAULT_PROMPT_PATH = "prompts/alice.md"
