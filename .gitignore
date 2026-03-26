@@ -11,6 +11,7 @@ alice-ui/.vite/
 .clinerules
 
 memory/*.json
+memory/*.md
 *.log
 /target/
 Cargo.lock
