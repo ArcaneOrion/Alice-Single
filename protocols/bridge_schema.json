@@ -1,0 +1,108 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Alice Bridge Protocol",
+  "description": "Frontend-Backend通信协议定义 (stdin/stdout JSON Lines)",
+  "version": "1.0.0",
+  "definitions": {
+    "Message": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["status", "thinking", "content", "tokens", "error", "interrupt"]
+        }
+      }
+    },
+    "StatusMessage": {
+      "allOf": [
+        { "$ref": "#/definitions/Message" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "status" },
+            "content": {
+              "type": "string",
+              "enum": ["ready", "thinking", "executing_tool", "done"]
+            }
+          },
+          "required": ["content"]
+        }
+      ]
+    },
+    "ThinkingMessage": {
+      "allOf": [
+        { "$ref": "#/definitions/Message" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "thinking" },
+            "content": { "type": "string" }
+          },
+          "required": ["content"]
+        }
+      ]
+    },
+    "ContentMessage": {
+      "allOf": [
+        { "$ref": "#/definitions/Message" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "content" },
+            "content": { "type": "string" }
+          },
+          "required": ["content"]
+        }
+      ]
+    },
+    "TokensMessage": {
+      "allOf": [
+        { "$ref": "#/definitions/Message" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "tokens" },
+            "total": { "type": "integer" },
+            "prompt": { "type": "integer" },
+            "completion": { "type": "integer" }
+          },
+          "required": ["total", "prompt", "completion"]
+        }
+      ]
+    },
+    "ErrorMessage": {
+      "allOf": [
+        { "$ref": "#/definitions/Message" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "error" },
+            "content": { "type": "string" },
+            "code": { "type": "string" }
+          },
+          "required": ["content"]
+        }
+      ]
+    },
+    "InterruptMessage": {
+      "allOf": [
+        { "$ref": "#/definitions/Message" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "interrupt" }
+          }
+        }
+      ]
+    }
+  },
+  "oneOf": [
+    { "$ref": "#/definitions/StatusMessage" },
+    { "$ref": "#/definitions/ThinkingMessage" },
+    { "$ref": "#/definitions/ContentMessage" },
+    { "$ref": "#/definitions/TokensMessage" },
+    { "$ref": "#/definitions/ErrorMessage" },
+    { "$ref": "#/definitions/InterruptMessage" }
+  ]
+}
