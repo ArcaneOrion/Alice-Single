@@ -1,0 +1,80 @@
+# Alice-Single 测试配置
+
+[testing]
+# 测试运行模式
+mode = "unit"  # unit, integration, all
+
+# 是否跳过慢速测试
+skip_slow = false
+
+# 是否跳过需要 Docker 的测试
+skip_docker = false
+
+# 测试超时设置（秒）
+timeout = 30
+
+# 并发测试进程数
+workers = 1
+
+[testing.paths]
+# 测试数据目录
+test_data = "backend/tests/fixtures"
+
+# 临时文件目录
+temp_dir = "/tmp/alice-test"
+
+# 测试输出目录
+output_dir = "backend/tests/output"
+
+[testing.memory]
+# 工作内存最大轮数（测试用较小值）
+working_memory_max_rounds = 5
+
+# STM 过期天数（测试用较小值）
+stm_expiry_days = 1
+
+[testing.llm]
+# Mock LLM 配置
+mock_response = "Test response"
+mock_thinking = ""
+mock_token_count = 100
+
+# 是否启用真实 LLM 调用（默认关闭）
+enable_real_llm = false
+
+[testing.docker]
+# Docker 容器名称
+container_name = "alice-test-instance"
+
+# Docker 镜像名称
+image_name = "alice-sandbox:test"
+
+# 工作目录
+work_dir = "/app"
+
+[testing.logging]
+# 日志级别
+level = "DEBUG"
+
+# 日志格式
+format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+# 是否捕获日志输出
+capture_logs = true
+
+[testing.coverage]
+# 是否启用覆盖率检查
+enabled = true
+
+# 覆盖率阈值（百分比）
+threshold = 80
+
+# 覆盖率报告格式
+report_format = ["html", "term"]
+
+[testing.markers]
+# 测试标记定义
+unit = "单元测试"
+integration = "集成测试"
+slow = "慢速测试"
+docker = "需要 Docker 的测试"
