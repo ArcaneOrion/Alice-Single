@@ -1,0 +1,25 @@
+[package]
+name = "alice-frontend"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+
+[dependencies]
+# 序列化/反序列化
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# 错误处理
+thiserror = { version = "2.0", optional = true }
+
+# TUI 框架
+ratatui = { version = "0.29", optional = true }
+crossterm = { version = "0.28", optional = true }
+
+# Unicode 支持
+unicode-width = { version = "0.2", optional = true }
+
+[features]
+default = ["tui"]
+tui = ["ratatui", "crossterm", "unicode-width", "dep:thiserror"]
+full = ["tui"]
