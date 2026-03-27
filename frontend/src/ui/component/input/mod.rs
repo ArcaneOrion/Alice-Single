@@ -2,4 +2,4 @@
 
 pub mod input_box;
 
-pub use input_box::{render_input_box, InputBoxConfig, INPUT_HEIGHT};
+pub use input_box::{INPUT_HEIGHT, InputBoxConfig, render_input_box};

@@ -3,7 +3,9 @@
 //! 定义 TUI 系统中使用的所有事件类型。
 
 use ratatui::layout::Rect;
-use serde::{Deserialize, Serialize};
+
+// 重新导出桥接消息类型
+pub use crate::bridge::protocol::message::BridgeMessage;
 
 /// 应用事件类型
 #[derive(Debug, Clone, PartialEq)]
@@ -149,22 +151,6 @@ pub enum UiArea {
     None,
 }
 
-/// 通信协议消息类型
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
-pub enum BridgeMessage {
-    /// 状态更新
-    Status { content: String },
-    /// 思考内容（侧边栏）
-    Thinking { content: String },
-    /// 正文内容（主聊天区）
-    Content { content: String },
-    /// Token 统计
-    Tokens { total: usize, prompt: usize, completion: usize },
-    /// 错误消息
-    Error { content: String },
-}
-
 /// 滚动状态
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScrollState {
@@ -194,6 +180,7 @@ impl ScrollState {
     /// 向下滚动
     pub fn scroll_down(&mut self) {
         self.offset += 1;
+        self.auto_scroll = false;
     }
 
     /// 更新自动滚动状态
@@ -342,7 +329,7 @@ mod tests {
         // 在输入区内
         assert_eq!(bounds.detect_area(10, 14, true), UiArea::Input);
 
-        // 侧边栏隐藏时，原侧边栏位置应为聊天区
-        assert_eq!(bounds.detect_area(60, 5, false), UiArea::Chat);
+        // 侧边栏隐藏但聊天区域未扩展时，应视为区域外
+        assert_eq!(bounds.detect_area(60, 5, false), UiArea::None);
     }
 }

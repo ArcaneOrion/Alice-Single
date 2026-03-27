@@ -21,6 +21,51 @@ from backend.alice.domain.llm.models.stream_chunk import StreamChunk
 
 logger = logging.getLogger(__name__)
 
+CURL_USER_AGENT = "curl/8.0.0"
+
+DEFAULT_REQUEST_HEADER_PROFILES: list[dict[str, str]] = [
+    {
+        "User-Agent": CURL_USER_AGENT,
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+    },
+    {
+        "User-Agent": CURL_USER_AGENT,
+        "Accept": "application/json",
+        "Connection": "keep-alive",
+        "Cache-Control": "no-cache",
+    },
+    {
+        "User-Agent": CURL_USER_AGENT,
+        "Accept": "*/*",
+        "Connection": "close",
+        "Pragma": "no-cache",
+    },
+]
+
+
+def resolve_request_header_profiles(
+    base_url: str,
+    configured_profiles: list[dict] | None = None,
+) -> list[dict]:
+    """解析最终生效的请求头轮询配置。
+
+    无论请求目标是什么，最终都保证带有 curl 风格 User-Agent。
+    若未显式配置，则使用默认轮询 profiles；若已显式配置，
+    则对每个 profile 注入/覆盖 User-Agent。
+    """
+    if configured_profiles:
+        return [ensure_curl_user_agent(profile) for profile in configured_profiles]
+
+    return [dict(profile) for profile in DEFAULT_REQUEST_HEADER_PROFILES]
+
+
+def ensure_curl_user_agent(headers: MutableMapping[str, Any] | dict | None = None) -> dict:
+    """确保请求头中始终使用 curl 风格 User-Agent。"""
+    normalized_headers = dict(headers or {})
+    normalized_headers["User-Agent"] = CURL_USER_AGENT
+    return normalized_headers
+
 
 @dataclass
 class RequestHeaderRotator:
@@ -108,12 +153,12 @@ class OpenAIProvider(BaseLLMProvider):
 
     def _get_extra_headers(self) -> dict:
         """获取额外的请求头"""
-        headers = dict(self.config.extra_headers)
+        headers = ensure_curl_user_agent(self.config.extra_headers)
 
         # 如果配置了轮换 profiles，使用轮换
         if self._header_rotator.profiles:
             _, profile_headers = self._header_rotator.next_profile()
-            headers.update(profile_headers)
+            headers.update(ensure_curl_user_agent(profile_headers))
             logger.debug(f"使用请求头 profile #{self._header_rotator._current_index - 1}")
 
         return headers
@@ -213,4 +258,11 @@ class OpenAIProvider(BaseLLMProvider):
             return super().count_tokens(messages)
 
 
-__all__ = ["OpenAIProvider", "OpenAIConfig", "RequestHeaderRotator"]
+__all__ = [
+    "CURL_USER_AGENT",
+    "OpenAIProvider",
+    "OpenAIConfig",
+    "RequestHeaderRotator",
+    "ensure_curl_user_agent",
+    "resolve_request_header_profiles",
+]

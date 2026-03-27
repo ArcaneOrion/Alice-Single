@@ -9,7 +9,7 @@ import logging
 import re
 from typing import Optional
 
-from ..protocol.messages import OutputMessage
+from .protocol.messages import OutputMessage
 
 logger = logging.getLogger(__name__)
 

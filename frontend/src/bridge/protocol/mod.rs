@@ -5,5 +5,5 @@
 pub mod codec;
 pub mod message;
 
-pub use codec::{JsonLinesCodec, DecodeError, DecodeResult, EncodeError, EncodeResult};
+pub use codec::{DecodeError, DecodeResult, EncodeError, EncodeResult, JsonLinesCodec};
 pub use message::{BridgeMessage, StatusContent};

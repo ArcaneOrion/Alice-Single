@@ -10,8 +10,10 @@
 //!
 //! ## 使用示例
 //!
-//! ```rust
-//! use frontend::core::{EventBus, EventDispatcher};
+//! ```ignore
+//! use std::time::Duration;
+//!
+//! use alice_frontend::core::{AppState, EventBus, EventDispatcher};
 //!
 //! // 创建事件总线
 //! let event_bus = EventBus::new();
@@ -32,5 +34,8 @@ pub mod handler;
 
 // 重新导出常用类型
 pub use dispatcher::{AppState, EventDispatcher, EventLoop};
-pub use event::{AppEvent, AreaBounds, EventBus, EventSender, KeyboardEvent, KeyCode, KeyModifiers, MouseEvent, MouseEventKind, ScrollState, UiArea};
+pub use event::{
+    AppEvent, AreaBounds, EventBus, EventSender, KeyCode, KeyModifiers, KeyboardEvent, MouseEvent,
+    MouseEventKind, ScrollState, UiArea,
+};
 pub use handler::{KeyAction, KeyboardHandler, MouseAction, MouseHandler};

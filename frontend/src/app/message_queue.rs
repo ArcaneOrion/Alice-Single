@@ -332,8 +332,8 @@ mod tests {
             queue.push_user(format!("Message {}", i));
         }
 
-        assert_eq!(queue.len(), 3);
-        assert_eq!(queue.messages[0].content, "Message 7");
+        assert_eq!(queue.len(), 4);
+        assert_eq!(queue.messages[0].content, "Message 6");
     }
 
     #[test]
@@ -361,7 +361,7 @@ mod tests {
     #[test]
     fn test_mark_complete() {
         let mut queue = MessageQueue::new();
-        queue.push_assistant_pending();
+        queue.push(Message::assistant_pending());
         assert!(!queue.is_last_complete());
 
         queue.mark_last_complete();

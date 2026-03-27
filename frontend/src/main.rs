@@ -25,34 +25,33 @@
 //! ```
 
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers, MouseEventKind},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use ratatui::{
-    backend::CrosstermBackend,
-    layout::Constraint,
-    style::{Color, Style},
-    text::Line,
-    widgets::{Block, Borders, Paragraph},
-    Frame, Terminal,
-};
+use ratatui::{Terminal, backend::CrosstermBackend};
 
-use std::io::{self, Stdout};
+use std::io;
 use std::time::{Duration, Instant};
 
-use app::state::{AgentStatus, App};
-use core::dispatcher::EventDispatcher;
+use alice_frontend::app::state::App;
+use alice_frontend::bridge::client::BridgeClient;
+use alice_frontend::core::dispatcher::{EventDispatcher, drain_bridge_messages};
+use alice_frontend::core::event::EventBus;
+use alice_frontend::ui::render_app;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 启动 Python 后端
-    let bridge_client = bridge::client::BridgeClient::spawn_default()?;
+    let bridge_client = BridgeClient::spawn_default()?;
+
+    // 初始化事件总线
+    let event_bus = EventBus::new();
 
     // 初始化应用状态
     let mut app = App::new(bridge_client);
 
     // 初始化事件分发器
-    let mut dispatcher = EventDispatcher::new();
+    let mut dispatcher = EventDispatcher::new(event_bus);
 
     // 初始化终端
     enable_raw_mode()?;
@@ -67,17 +66,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 主事件循环
     loop {
         // 处理来自后端的消息
-        while let Ok(msg) = app.bridge_client.try_recv_message() {
-            dispatcher.handle_bridge_message(&mut app, msg);
+        if !drain_bridge_messages(&mut app, &mut dispatcher) {
+            break;
         }
 
         // 处理来自后端的错误
-        while let Ok(err) = app.bridge_client.try_recv_error() {
+        while let Some(err) = app.bridge_client.try_recv_error() {
             dispatcher.handle_bridge_error(&mut app, err);
         }
 
         // 渲染 UI
-        terminal.draw(|f| ui(f, &mut app))?;
+        terminal.draw(|f| render_app(f, &mut app))?;
+        dispatcher.update_areas(
+            app.area_bounds.chat_area,
+            app.area_bounds.sidebar_area,
+            app.area_bounds.input_area,
+        );
 
         // 处理终端事件
         let timeout = tick_rate
@@ -111,50 +115,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 优雅退出
     drop(terminal);
     disable_raw_mode()?;
-    execute!(
-        io::stdout(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
+    execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture)?;
 
     Ok(())
-}
-
-fn ui(f: &mut Frame, app: &mut App) {
-    // TODO: 实现UI渲染
-    // 当前为简化版本，完整UI组件将逐步从 ui/component 模块迁移
-    let chunks = ratatui::layout::Layout::default()
-        .direction(ratatui::layout::Direction::Vertical)
-        .constraints([
-            ratatui::layout::Constraint::Length(3),
-            ratatui::layout::Constraint::Min(10),
-            ratatui::layout::Constraint::Length(3),
-        ])
-        .split(f.size());
-
-    // Header
-    let status_text = match app.status {
-        AgentStatus::Idle => "⚡ 就绪",
-        AgentStatus::Thinking => "💭 思考中...",
-        AgentStatus::Responding => "✍️ 回复中...",
-        AgentStatus::ExecutingTool => "🔧 执行工具...",
-        AgentStatus::Starting => "⏳ 启动中...",
-    };
-
-    let header = Paragraph::new(Line::from(vec![
-        " ALICE ASSISTANT ",
-        status_text,
-    ]))
-    .block(Block::default().borders(Borders::ALL));
-    f.render_widget(header, chunks[0]);
-
-    // Main area (placeholder)
-    let main = Paragraph::new("Alice 重构版本 - UI 组件正在迁移中...")
-        .block(Block::default().borders(Borders::ALL).title(" 对话历史 "));
-    f.render_widget(main, chunks[1]);
-
-    // Input
-    let input = Paragraph::new(app.input.as_str())
-        .block(Block::default().borders(Borders::ALL).title(" 输入 "));
-    f.render_widget(input, chunks[2]);
 }

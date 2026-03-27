@@ -111,6 +111,25 @@ class RequestContext:
         )
 
 
+@dataclass
+class WorkflowContext:
+    """工作流上下文
+
+    包含工作流执行过程中需要的上下文信息。
+
+    Attributes:
+        request_context: 请求上下文
+        user_input: 用户输入
+        messages: 消息历史
+        interrupted: 是否被中断
+    """
+
+    request_context: RequestContext
+    user_input: str
+    messages: list = field(default_factory=list)
+    interrupted: bool = False
+
+
 __all__ = [
     "RequestType",
     "ChatRequest",
@@ -119,4 +138,5 @@ __all__ = [
     "RefreshRequest",
     "ApplicationRequest",
     "RequestContext",
+    "WorkflowContext",
 ]

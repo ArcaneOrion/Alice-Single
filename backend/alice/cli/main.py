@@ -16,7 +16,8 @@ import traceback
 from pathlib import Path
 
 # 添加项目根目录到 Python 路径
-project_root = Path(__file__).parent.parent.parent
+# backend/alice/cli/main.py -> 向上4级到项目根目录
+project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 # 强制切换到项目根目录
@@ -29,6 +30,7 @@ from backend.alice.application.agent import AliceAgent
 from backend.alice.application.services import OrchestrationService, LifecycleService
 from backend.alice.application.workflow import WorkflowChain, ChatWorkflow
 from backend.alice.application.dto import RequestContext, ChatRequest, response_to_dict
+from backend.alice.domain.llm.providers.openai_provider import resolve_request_header_profiles
 from backend.alice.infrastructure.bridge.protocol.messages import INTERRUPT_SIGNAL
 
 
@@ -41,6 +43,24 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger("AliceCLI")
+
+
+def _parse_request_header_profiles(profiles_str: str) -> list[dict]:
+    """解析环境变量中的请求头轮询配置。"""
+    if not profiles_str.strip():
+        return []
+
+    try:
+        parsed = json.loads(profiles_str)
+    except json.JSONDecodeError:
+        import ast
+
+        parsed = ast.literal_eval(profiles_str)
+
+    if not isinstance(parsed, list) or not all(isinstance(item, dict) for item in parsed):
+        raise ValueError("REQUEST_HEADER_PROFILES 必须是对象数组")
+
+    return parsed
 
 
 class TUIBridge:
@@ -100,10 +120,13 @@ class TUIBridge:
             profiles_str = os.getenv("REQUEST_HEADER_PROFILES", "")
             if profiles_str:
                 try:
-                    import ast
-                    request_header_profiles = ast.literal_eval(profiles_str)
-                except:
+                    request_header_profiles = _parse_request_header_profiles(profiles_str)
+                except Exception:
                     logger.warning("解析 REQUEST_HEADER_PROFILES 失败")
+            request_header_profiles = resolve_request_header_profiles(
+                base_url,
+                request_header_profiles,
+            )
 
             # 创建编排服务
             orchestration = OrchestrationService.create_from_config(

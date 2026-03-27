@@ -8,7 +8,7 @@ import logging
 from datetime import datetime
 from typing import Optional, Any
 
-from backend.alice.domain.llm.services.client_provider import ClientProvider
+from backend.alice.domain.llm.providers.openai_provider import OpenAIProvider
 
 logger = logging.getLogger(__name__)
 
@@ -26,12 +26,13 @@ class Distiller:
         "1. 用户的新习惯或偏好变更。\n"
         "2. 重要的项目决策或里程碑进展。\n"
         "3. 用户提到的重要个人事实。\n\n"
-        "请以 Markdown 列表格式输出提炼结果，保持简洁。如果没有值得记录的长期价值，请回复"无重要更新"。"
+        "请以 Markdown 列表格式输出提炼结果，保持简洁。如果没有值得记录的长期价值，请回复"
+        "'无重要更新'。"
     )
 
     def __init__(
         self,
-        llm_provider: Optional[ClientProvider] = None,
+        llm_provider: Optional[OpenAIProvider] = None,
         model_name: Optional[str] = None,
     ):
         """初始化提炼服务
@@ -76,13 +77,18 @@ class Distiller:
             prompt = self._build_distill_prompt(expired_content, full_context)
 
             # 调用 LLM
-            client = self.llm_provider.get_client()
-            model_name = self.model_name or self.llm_provider.get_model_name()
+            client = self.llm_provider.client
+            model_name = self.model_name or self.llm_provider.model_name
+            request_kwargs: dict[str, Any] = {
+                "model": model_name,
+                "messages": [{"role": "user", "content": prompt}],
+            }
 
-            response = client.chat.completions.create(
-                model=model_name,
-                messages=[{"role": "user", "content": prompt}],
-            )
+            get_extra_headers = getattr(self.llm_provider, "_get_extra_headers", None)
+            if callable(get_extra_headers):
+                request_kwargs["extra_headers"] = get_extra_headers()
+
+            response = client.chat.completions.create(**request_kwargs)
 
             summary = response.choices[0].message.content.strip()
 

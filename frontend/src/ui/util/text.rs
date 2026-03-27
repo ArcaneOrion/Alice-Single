@@ -17,6 +17,8 @@ use unicode_width::UnicodeWidthChar;
 ///
 /// # 示例
 /// ```
+/// use alice_frontend::ui::format_text_to_lines;
+///
 /// let lines = format_text_to_lines("Hello 世界", 5);
 /// // ["Hello", "世界"]
 /// ```
@@ -35,6 +37,7 @@ pub fn format_text_to_lines(text: &str, width: usize) -> Vec<String> {
 
         let mut current_line = String::new();
         let mut current_width = 0;
+        let mut preserving_leading_whitespace = true;
 
         for ch in paragraph.chars() {
             let ch_width = UnicodeWidthChar::width(ch).unwrap_or(1);
@@ -57,8 +60,16 @@ pub fn format_text_to_lines(text: &str, width: usize) -> Vec<String> {
                 }
             }
 
+            if current_line.is_empty() && ch.is_whitespace() && !preserving_leading_whitespace {
+                continue;
+            }
+
             current_line.push(ch);
             current_width += ch_width;
+
+            if !ch.is_whitespace() {
+                preserving_leading_whitespace = false;
+            }
         }
 
         // 添加最后一行
@@ -109,5 +120,17 @@ mod tests {
         // H=1, i=1, 你=2 -> 总共 4，可以放下
         // 好=2，另起一行
         assert_eq!(result, vec!["Hi你", "好"]);
+    }
+
+    #[test]
+    fn test_preserve_leading_spaces_when_wrapping() {
+        let result = format_text_to_lines("    abc", 4);
+        assert_eq!(result, vec!["    ", "abc"]);
+    }
+
+    #[test]
+    fn test_preserve_leading_spaces_after_newline() {
+        let result = format_text_to_lines("title\n  nested", 20);
+        assert_eq!(result, vec!["title", "  nested"]);
     }
 }

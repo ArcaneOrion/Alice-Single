@@ -3,10 +3,10 @@
 //! 显示应用标题、运行状态、Token 统计等信息的头部区域。
 
 use ratatui::{
+    Frame,
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
-    Frame,
 };
 
 /// Agent 运行状态
@@ -25,9 +25,13 @@ impl AgentStatus {
         match self {
             AgentStatus::Starting => Style::default().fg(Color::Blue),
             AgentStatus::Idle => Style::default().fg(Color::Green),
-            AgentStatus::Thinking => Style::default().fg(Color::Yellow).add_modifier(Modifier::ITALIC),
+            AgentStatus::Thinking => Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::ITALIC),
             AgentStatus::Responding => Style::default().fg(Color::Magenta),
-            AgentStatus::ExecutingTool => Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            AgentStatus::ExecutingTool => Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         }
     }
 
@@ -107,7 +111,9 @@ pub fn render_header(f: &mut Frame, area: ratatui::layout::Rect, config: &Header
     let header_line = Line::from(vec![
         Span::styled(
             " ALICE ASSISTANT ",
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::raw(" | 状态:"),
         Span::styled(status_text, status_style),

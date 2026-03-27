@@ -13,7 +13,7 @@ from backend.alice.domain.memory.stores.stm_store import STMStore
 from backend.alice.domain.memory.stores.ltm_store import LTMStore
 from backend.alice.domain.memory.services.distiller import Distiller
 from backend.alice.core.interfaces.memory_store import MemoryEntry, RoundEntry
-from backend.alice.domain.llm.services.client_provider import ClientProvider
+from backend.alice.domain.llm.providers.openai_provider import OpenAIProvider
 
 
 class MemoryManager:
@@ -28,7 +28,7 @@ class MemoryManager:
         working_memory_path: str,
         stm_path: str,
         ltm_path: str,
-        llm_provider: Optional[ClientProvider] = None,
+        llm_provider: Optional[OpenAIProvider] = None,
         max_working_rounds: int = 30,
         stm_days_to_keep: int = 7,
     ):

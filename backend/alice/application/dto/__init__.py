@@ -12,6 +12,7 @@ from .requests import (
     RefreshRequest,
     ApplicationRequest,
     RequestContext,
+    WorkflowContext,
 )
 
 from .responses import (
@@ -40,6 +41,7 @@ __all__ = [
     "RefreshRequest",
     "ApplicationRequest",
     "RequestContext",
+    "WorkflowContext",
     # Responses
     "ResponseType",
     "StatusType",

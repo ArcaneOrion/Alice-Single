@@ -3,10 +3,12 @@
 //! 处理鼠标输入事件，包括滚动、点击和拖拽。
 //! 包含碰撞检测逻辑，用于确定鼠标事件发生的 UI 区域。
 
-use crossterm::event::{MouseEvent as CrosstermMouseEvent, MouseEventKind as CrosstermMouseEventKind};
+use crossterm::event::{
+    MouseEvent as CrosstermMouseEvent, MouseEventKind as CrosstermMouseEventKind,
+};
 use ratatui::layout::Rect;
 
-use super::event::types::{MouseEvent, MouseEventKind, MouseButton, UiArea};
+use crate::core::event::types::{MouseButton, MouseEvent, MouseEventKind, UiArea};
 
 /// 鼠标事件处理结果
 #[derive(Debug, Clone, PartialEq)]
@@ -24,7 +26,13 @@ pub enum MouseAction {
     /// 点击事件
     Click { area: UiArea, x: u16, y: u16 },
     /// 拖拽事件
-    Drag { area: UiArea, from_x: u16, from_y: u16, to_x: u16, to_y: u16 },
+    Drag {
+        area: UiArea,
+        from_x: u16,
+        from_y: u16,
+        to_x: u16,
+        to_y: u16,
+    },
 }
 
 /// 鼠标事件处理器
@@ -207,13 +215,9 @@ pub fn convert_mouse_kind(kind: CrosstermMouseEventKind) -> MouseEventKind {
     match kind {
         CrosstermMouseEventKind::ScrollUp => MouseEventKind::ScrollUp,
         CrosstermMouseEventKind::ScrollDown => MouseEventKind::ScrollDown,
-        CrosstermMouseEventKind::Down(btn) => {
-            MouseEventKind::Down(convert_mouse_button(btn))
-        }
+        CrosstermMouseEventKind::Down(btn) => MouseEventKind::Down(convert_mouse_button(btn)),
         CrosstermMouseEventKind::Up(btn) => MouseEventKind::Up(convert_mouse_button(btn)),
-        CrosstermMouseEventKind::Drag(btn) => {
-            MouseEventKind::Drag(convert_mouse_button(btn))
-        }
+        CrosstermMouseEventKind::Drag(btn) => MouseEventKind::Drag(convert_mouse_button(btn)),
         CrosstermMouseEventKind::Moved => MouseEventKind::Moved,
         _ => MouseEventKind::Moved,
     }

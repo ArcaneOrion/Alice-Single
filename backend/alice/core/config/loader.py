@@ -5,11 +5,15 @@
 """
 
 import os
-import tomli
 from pathlib import Path
 from typing import Optional
 
 from .settings import Settings, LLMConfig, MemoryConfig, DockerConfig, LoggingConfig
+
+try:
+    import tomllib as toml
+except ModuleNotFoundError:
+    import tomli as toml
 
 
 class ConfigLoader:
@@ -46,7 +50,7 @@ class ConfigLoader:
 
         try:
             with open(config_path, "rb") as f:
-                data = tomli.load(f)
+                data = toml.load(f)
             return self._parse_toml(data)
         except Exception as e:
             print(f"Warning: Failed to load config from {config_path}: {e}")

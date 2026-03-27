@@ -105,7 +105,7 @@ impl EventSender {
         modifiers: KeyModifiers,
         is_release: bool,
     ) -> Result<(), mpsc::SendError<AppEvent>> {
-        use super::types::{KeyboardEvent, AppEvent};
+        use super::types::{AppEvent, KeyboardEvent};
         self.send(AppEvent::Key(KeyboardEvent {
             code,
             modifiers,
@@ -130,7 +130,6 @@ pub use super::types::{KeyCode, KeyModifiers};
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::event::types::{KeyboardEvent, MouseEvent, MouseEventKind};
 
     #[test]
     fn test_event_bus_send_recv() {

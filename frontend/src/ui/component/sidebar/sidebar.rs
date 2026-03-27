@@ -3,10 +3,10 @@
 //! 显示 Alice 的思考过程（thinking 内容），支持自动滚动。
 
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, Paragraph, Wrap},
-    Frame,
 };
 
 use crate::ui::util::text::format_text_to_lines;
@@ -70,7 +70,9 @@ pub fn render_sidebar(
         " 💭 ".to_string()
     };
 
-    let style = Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC);
+    let style = Style::default()
+        .fg(Color::Gray)
+        .add_modifier(Modifier::ITALIC);
 
     // 计算内容行数以实现自动滚动
     let lines = format_text_to_lines(display_content, width);

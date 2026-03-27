@@ -10,10 +10,10 @@
 //! - [`app`] - 应用状态和主逻辑
 
 // 核心模块
+pub mod app;
 pub mod bridge;
 pub mod core;
 pub mod ui;
-pub mod app;
 pub mod util;
 
 // 重新导出常用类型

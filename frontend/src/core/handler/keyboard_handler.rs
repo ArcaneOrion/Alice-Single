@@ -2,13 +2,9 @@
 //!
 //! 处理键盘输入事件，转换为应用命令或状态变更。
 
-use std::io::Write;
-
 use crossterm::event::{KeyCode as CrosstermKeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use ratatui::layout::Rect;
 
-use super::event::{KeyboardEvent, KeyCode, KeyModifiers as OurKeyModifiers};
-use super::types::{AgentStatus, UiArea};
+use crate::core::event::types::{KeyCode, KeyModifiers as OurKeyModifiers, KeyboardEvent, UiArea};
 
 /// 键盘事件处理结果
 #[derive(Debug, Clone, PartialEq)]
@@ -268,28 +264,28 @@ mod tests {
     #[test]
     fn test_ctrl_c_quit() {
         let handler = create_handler();
-        let event = KeyEvent::new(
-            CrosstermKeyCode::Char('c'),
-            KeyModifiers::CONTROL,
-        );
+        let event = KeyEvent::new(CrosstermKeyCode::Char('c'), KeyModifiers::CONTROL);
         assert_eq!(handler.handle_crossterm_event(event), KeyAction::Quit);
     }
 
     #[test]
     fn test_ctrl_o_toggle_thinking() {
         let handler = create_handler();
-        let event = KeyEvent::new(
-            CrosstermKeyCode::Char('o'),
-            KeyModifiers::CONTROL,
+        let event = KeyEvent::new(CrosstermKeyCode::Char('o'), KeyModifiers::CONTROL);
+        assert_eq!(
+            handler.handle_crossterm_event(event),
+            KeyAction::ToggleThinking
         );
-        assert_eq!(handler.handle_crossterm_event(event), KeyAction::ToggleThinking);
     }
 
     #[test]
     fn test_char_input_when_idle() {
         let handler = create_handler();
         let event = KeyEvent::new(CrosstermKeyCode::Char('a'), KeyModifiers::empty());
-        assert_eq!(handler.handle_crossterm_event(event), KeyAction::InputChar('a'));
+        assert_eq!(
+            handler.handle_crossterm_event(event),
+            KeyAction::InputChar('a')
+        );
     }
 
     #[test]
@@ -311,7 +307,10 @@ mod tests {
     fn test_enter_send_message() {
         let handler = create_handler();
         let event = KeyEvent::new(CrosstermKeyCode::Enter, KeyModifiers::empty());
-        assert_eq!(handler.handle_crossterm_event(event), KeyAction::SendMessage);
+        assert_eq!(
+            handler.handle_crossterm_event(event),
+            KeyAction::SendMessage
+        );
     }
 
     #[test]
@@ -326,25 +325,32 @@ mod tests {
     fn test_esc_no_interrupt_when_idle() {
         let handler = create_handler();
         let event = KeyEvent::new(CrosstermKeyCode::Esc, KeyModifiers::empty());
-        assert_eq!(handler.handle_crosterm_event(event), KeyAction::None);
+        assert_eq!(handler.handle_crossterm_event(event), KeyAction::None);
     }
 
     #[test]
     fn test_arrow_keys() {
         let handler = create_handler();
         assert_eq!(
-            handler.handle_crossterm_event(KeyEvent::new(CrosstermKeyCode::Up, KeyModifiers::empty())),
+            handler
+                .handle_crossterm_event(KeyEvent::new(CrosstermKeyCode::Up, KeyModifiers::empty())),
             KeyAction::ScrollUp
         );
         assert_eq!(
-            handler.handle_crossterm_event(KeyEvent::new(CrosstermKeyCode::Down, KeyModifiers::empty())),
+            handler.handle_crossterm_event(KeyEvent::new(
+                CrosstermKeyCode::Down,
+                KeyModifiers::empty()
+            )),
             KeyAction::ScrollDown
         );
     }
 
     #[test]
     fn test_convert_key_code() {
-        assert_eq!(convert_key_code(CrosstermKeyCode::Char('a')), KeyCode::Char('a'));
+        assert_eq!(
+            convert_key_code(CrosstermKeyCode::Char('a')),
+            KeyCode::Char('a')
+        );
         assert_eq!(convert_key_code(CrosstermKeyCode::Enter), KeyCode::Enter);
         assert_eq!(convert_key_code(CrosstermKeyCode::Esc), KeyCode::Esc);
         assert_eq!(convert_key_code(CrosstermKeyCode::Up), KeyCode::Up);

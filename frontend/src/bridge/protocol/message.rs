@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 /// Bridge 通信消息
 ///
 /// 使用 tagged enum 表示，序列化为带 `type` 字段的 JSON 对象。
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum BridgeMessage {
     /// 状态更新消息
@@ -41,7 +41,11 @@ pub enum BridgeMessage {
     Content { content: String },
 
     /// Token 统计
-    Tokens { total: usize, prompt: usize, completion: usize },
+    Tokens {
+        total: usize,
+        prompt: usize,
+        completion: usize,
+    },
 
     /// 错误消息
     Error { content: String },
@@ -100,43 +104,31 @@ impl std::fmt::Display for StatusContent {
     }
 }
 
-/// 用于反序列化时的字符串变体
-///
-/// Python 侧发送的是字符串，我们需要先解析为字符串再转换。
-#[derive(Debug, Clone, Deserialize)]
-#[serde(field_identifier, rename_all = "snake_case")]
-enum StatusField {
-    Ready,
-    Thinking,
-    ExecutingTool,
-    Done,
-}
-
-/// 状态消息的字符串内容 (用于与 Python 兼容)
-///
-/// Python 侧发送 `"content": "ready"` 这样的字符串，
-/// 我们需要将其反序列化为 `StatusContent` 枚举。
-#[derive(Debug, Deserialize)]
-struct RawStatusMessage {
-    content: String,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_serialize_status() {
-        let msg = BridgeMessage::Status { content: StatusContent::Ready };
+        let msg = BridgeMessage::Status {
+            content: StatusContent::Ready,
+        };
         let json = serde_json::to_string(&msg).unwrap();
         assert_eq!(json, r#"{"type":"status","content":"ready"}"#);
     }
 
     #[test]
     fn test_serialize_tokens() {
-        let msg = BridgeMessage::Tokens { total: 1234, prompt: 800, completion: 434 };
+        let msg = BridgeMessage::Tokens {
+            total: 1234,
+            prompt: 800,
+            completion: 434,
+        };
         let json = serde_json::to_string(&msg).unwrap();
-        assert_eq!(json, r#"{"type":"tokens","total":1234,"prompt":800,"completion":434}"#);
+        assert_eq!(
+            json,
+            r#"{"type":"tokens","total":1234,"prompt":800,"completion":434}"#
+        );
     }
 
     #[test]
@@ -148,9 +140,31 @@ mod tests {
 
     #[test]
     fn test_is_stream_content() {
-        assert!(BridgeMessage::Thinking { content: "test".into() }.is_stream_content());
-        assert!(BridgeMessage::Content { content: "test".into() }.is_stream_content());
-        assert!(!BridgeMessage::Status { content: StatusContent::Ready }.is_stream_content());
-        assert!(!BridgeMessage::Tokens { total: 0, prompt: 0, completion: 0 }.is_stream_content());
+        assert!(
+            BridgeMessage::Thinking {
+                content: "test".into()
+            }
+            .is_stream_content()
+        );
+        assert!(
+            BridgeMessage::Content {
+                content: "test".into()
+            }
+            .is_stream_content()
+        );
+        assert!(
+            !BridgeMessage::Status {
+                content: StatusContent::Ready
+            }
+            .is_stream_content()
+        );
+        assert!(
+            !BridgeMessage::Tokens {
+                total: 0,
+                prompt: 0,
+                completion: 0
+            }
+            .is_stream_content()
+        );
     }
 }

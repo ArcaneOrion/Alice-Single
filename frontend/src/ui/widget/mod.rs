@@ -3,8 +3,8 @@
 //! 重新导出 UI 组件，提供简化的访问路径。
 
 pub use crate::ui::component::{
-    AgentStatus, Author, ChatViewConfig, ChatViewState, HeaderConfig, InputBoxConfig,
-    Message, SidebarConfig, INPUT_HEIGHT,
+    AgentStatus, Author, ChatViewConfig, ChatViewState, HeaderConfig, INPUT_HEIGHT, InputBoxConfig,
+    Message, SidebarConfig,
 };
 
 pub use crate::ui::util::format_text_to_lines;

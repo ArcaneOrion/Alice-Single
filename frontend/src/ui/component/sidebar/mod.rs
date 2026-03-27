@@ -2,4 +2,4 @@
 
 pub mod sidebar;
 
-pub use sidebar::{render_sidebar, SidebarConfig};
+pub use sidebar::{SidebarConfig, render_sidebar};

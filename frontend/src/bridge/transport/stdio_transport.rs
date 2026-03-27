@@ -6,13 +6,13 @@
 //!
 //! ```text
 //! Rust                          Python
-│ ┌──────────────┐              ┌──────────────┐
-│ │  StdioWriter │──stdin──────→│              │
-│ └──────────────┘              │              │
-│                               │ tui_bridge   │
-│ ┌──────────────┐              │     .py      │
-│ │StdioReader   │←─stdout─────│              │
-│ └──────────────┘              └──────────────┘
+//! │ ┌──────────────┐              ┌──────────────┐
+//! │ │  StdioWriter │──stdin──────→│              │
+//! │ └──────────────┘              │              │
+//! │                               │ tui_bridge   │
+//! │ ┌──────────────┐              │     .py      │
+//! │ │StdioReader   │←─stdout─────│              │
+//! │ └──────────────┘              └──────────────┘
 //! ```
 //!
 //! ## 线程安全
@@ -21,7 +21,8 @@
 //! - 读取操作在独立线程中进行，通过 `mpsc::channel` 传递消息
 
 use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, ChildStdin, ChildStdout, ChildStderr, Stdio};
+use std::path::PathBuf;
+use std::process::{Child, ChildStdin, Stdio};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
@@ -63,17 +64,16 @@ pub struct StdioTransport {
 
     /// stdin 写入器
     stdin: ChildStdinWrapper,
-
-    /// 消息接收器 (来自 stdout)
-    receiver: Receiver<BridgeMessage>,
-
-    /// 错误接收器 (来自 stderr)
-    error_receiver: Receiver<String>,
 }
 
 impl StdioTransport {
-    /// 默认的 Python 桥接脚本路径
-    pub const DEFAULT_BRIDGE_PATH: &'static str = "./tui_bridge.py";
+    /// 默认的 Python 桥接脚本路径（相对于 frontend crate 根目录）
+    pub const DEFAULT_BRIDGE_PATH: &'static str = "../backend/alice/cli/main.py";
+
+    /// 解析默认桥接脚本绝对路径
+    pub fn default_bridge_path() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(Self::DEFAULT_BRIDGE_PATH)
+    }
 
     /// 创建新的传输层并启动 Python 子进程
     ///
@@ -91,9 +91,12 @@ impl StdioTransport {
     /// # 错误
     ///
     /// 如果子进程启动失败，返回 `io::Error`。
-    pub fn spawn(bridge_path: &str) -> std::io::Result<(Self, Receiver<BridgeMessage>, Receiver<String>)> {
-        // 启动 Python 子进程
+    pub fn spawn(
+        bridge_path: &str,
+    ) -> std::io::Result<(Self, Receiver<BridgeMessage>, Receiver<String>)> {
+        // 启动 Python 子进程 (使用 -u 禁用缓冲)
         let mut child = std::process::Command::new("python3")
+            .arg("-u")
             .arg(bridge_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -102,22 +105,21 @@ impl StdioTransport {
 
         let stdin = child.stdin.take().ok_or(std::io::Error::new(
             std::io::ErrorKind::BrokenPipe,
-            "Failed to open stdin"
+            "Failed to open stdin",
         ))?;
 
         let stdout = child.stdout.take().ok_or(std::io::Error::new(
             std::io::ErrorKind::BrokenPipe,
-            "Failed to open stdout"
+            "Failed to open stdout",
         ))?;
 
         let stderr = child.stderr.take().ok_or(std::io::Error::new(
             std::io::ErrorKind::BrokenPipe,
-            "Failed to open stderr"
+            "Failed to open stderr",
         ))?;
 
         // 创建消息通道
         let (tx, rx): (Sender<BridgeMessage>, Receiver<BridgeMessage>) = mpsc::channel();
-        let tx_err = tx.clone();
         let (err_tx, err_rx): (Sender<String>, Receiver<String>) = mpsc::channel();
 
         // 启动 stdout 读取线程
@@ -139,11 +141,6 @@ impl StdioTransport {
             for line in reader.lines() {
                 if let Ok(l) = line {
                     if !l.trim().is_empty() {
-                        // 将 stderr 内容转换为错误消息
-                        let _ = tx_err.send(BridgeMessage::Error {
-                            content: format!("Backend stderr: {}", l)
-                        });
-                        // 同时发送到错误通道
                         let _ = err_tx.send(l);
                     }
                 }
@@ -154,8 +151,6 @@ impl StdioTransport {
             Self {
                 child,
                 stdin: ChildStdinWrapper(stdin),
-                receiver: rx,
-                error_receiver: err_rx,
             },
             rx,
             err_rx,
@@ -164,7 +159,30 @@ impl StdioTransport {
 
     /// 使用默认路径创建传输层
     pub fn spawn_default() -> std::io::Result<(Self, Receiver<BridgeMessage>, Receiver<String>)> {
-        Self::spawn(Self::DEFAULT_BRIDGE_PATH)
+        let path = Self::default_bridge_path();
+        Self::spawn(path.to_string_lossy().as_ref())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn spawn_test_transport() -> std::io::Result<Self> {
+        let mut child = std::process::Command::new("python3")
+            .arg("-u")
+            .arg("-c")
+            .arg("import sys\nfor _ in sys.stdin:\n    pass\n")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()?;
+
+        let stdin = child.stdin.take().ok_or(std::io::Error::new(
+            std::io::ErrorKind::BrokenPipe,
+            "Failed to open stdin",
+        ))?;
+
+        Ok(Self {
+            child,
+            stdin: ChildStdinWrapper(stdin),
+        })
     }
 
     /// 发送原始文本到 Python (通过 stdin)
@@ -184,16 +202,6 @@ impl StdioTransport {
     /// 发送中断信号到 Python
     pub fn send_interrupt(&mut self) -> std::io::Result<()> {
         self.send_text("__INTERRUPT__").map(|_| ())
-    }
-
-    /// 获取消息接收器
-    pub fn receiver(&self) -> &Receiver<BridgeMessage> {
-        &self.receiver
-    }
-
-    /// 获取错误接收器
-    pub fn error_receiver(&self) -> &Receiver<String> {
-        &self.error_receiver
     }
 
     /// 获取 stdin 写入器的引用
@@ -222,7 +230,9 @@ pub struct StdioWriter {
 impl StdioWriter {
     /// 从 ChildStdin 创建新的写入器
     pub fn new(stdin: ChildStdin) -> Self {
-        Self(ChildStdinWrapper(stdin))
+        Self {
+            stdin: ChildStdinWrapper(stdin),
+        }
     }
 
     /// 发送文本
@@ -239,6 +249,13 @@ impl StdioWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_default_bridge_path_is_absolute() {
+        let path = StdioTransport::default_bridge_path();
+        assert!(path.is_absolute());
+        assert!(path.ends_with("backend/alice/cli/main.py"));
+    }
 
     #[test]
     fn test_child_stdin_wrapper_send() {

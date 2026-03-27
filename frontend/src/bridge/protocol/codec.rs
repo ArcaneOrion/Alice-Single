@@ -27,6 +27,9 @@ pub type DecodeResult<T> = Result<T, DecodeError>;
 pub enum EncodeError {
     #[error("JSON serialization error: {0}")]
     JsonError(#[from] serde_json::Error),
+
+    #[error("IO error: {0}")]
+    IoError(#[from] std::io::Error),
 }
 
 /// 解码错误
@@ -65,7 +68,11 @@ impl JsonLinesCodec {
     }
 
     /// 编码并发送到写入器
-    pub fn encode_to<W: Write>(&self, message: &BridgeMessage, writer: &mut W) -> EncodeResult<usize> {
+    pub fn encode_to<W: Write>(
+        &self,
+        message: &BridgeMessage,
+        writer: &mut W,
+    ) -> EncodeResult<usize> {
         let json = self.encode(message)?;
         let bytes = json.as_bytes();
         writer.write_all(bytes)?;
@@ -114,7 +121,9 @@ mod tests {
     #[test]
     fn test_encode_status() {
         let codec = JsonLinesCodec::new();
-        let msg = BridgeMessage::Status { content: StatusContent::Ready };
+        let msg = BridgeMessage::Status {
+            content: StatusContent::Ready,
+        };
         let encoded = codec.encode(&msg).unwrap();
         assert_eq!(encoded, "{\"type\":\"status\",\"content\":\"ready\"}\n");
     }
@@ -122,23 +131,44 @@ mod tests {
     #[test]
     fn test_encode_thinking() {
         let codec = JsonLinesCodec::new();
-        let msg = BridgeMessage::Thinking { content: "正在思考...".into() };
+        let msg = BridgeMessage::Thinking {
+            content: "正在思考...".into(),
+        };
         let encoded = codec.encode(&msg).unwrap();
-        assert_eq!(encoded, "{\"type\":\"thinking\",\"content\":\"正在思考...\"}\n");
+        assert_eq!(
+            encoded,
+            "{\"type\":\"thinking\",\"content\":\"正在思考...\"}\n"
+        );
     }
 
     #[test]
     fn test_decode_status() {
         let codec = JsonLinesCodec::new();
-        let msg = codec.decode("{\"type\":\"status\",\"content\":\"ready\"}").unwrap();
-        assert_eq!(msg, BridgeMessage::Status { content: StatusContent::Ready });
+        let msg = codec
+            .decode("{\"type\":\"status\",\"content\":\"ready\"}")
+            .unwrap();
+        assert_eq!(
+            msg,
+            BridgeMessage::Status {
+                content: StatusContent::Ready
+            }
+        );
     }
 
     #[test]
     fn test_decode_tokens() {
         let codec = JsonLinesCodec::new();
-        let msg = codec.decode("{\"type\":\"tokens\",\"total\":1234,\"prompt\":800,\"completion\":434}").unwrap();
-        assert_eq!(msg, BridgeMessage::Tokens { total: 1234, prompt: 800, completion: 434 });
+        let msg = codec
+            .decode("{\"type\":\"tokens\",\"total\":1234,\"prompt\":800,\"completion\":434}")
+            .unwrap();
+        assert_eq!(
+            msg,
+            BridgeMessage::Tokens {
+                total: 1234,
+                prompt: 800,
+                completion: 434
+            }
+        );
     }
 
     #[test]

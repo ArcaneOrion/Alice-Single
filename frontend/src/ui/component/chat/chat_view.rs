@@ -3,11 +3,11 @@
 //! 负责渲染对话历史消息，包括自动滚动和文本格式化。
 
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState},
-    Frame,
 };
 
 use crate::ui::util::text::format_text_to_lines;
@@ -143,12 +143,12 @@ pub fn render_chat_view(
 
         // 2. 渲染正文内容
         // 思考过程已移至侧边栏，此处不再渲染
-        let content_text = if msg.content.is_empty() && !msg.is_complete && msg.author == Author::Assistant
-        {
-            format!("{} 正在处理中...", get_spinner(config.spinner_index))
-        } else {
-            msg.content.clone()
-        };
+        let content_text =
+            if msg.content.is_empty() && !msg.is_complete && msg.author == Author::Assistant {
+                format!("{} 正在处理中...", get_spinner(config.spinner_index))
+            } else {
+                msg.content.clone()
+            };
 
         let content_lines = format_text_to_lines(&content_text, width);
         for line in content_lines {
@@ -166,8 +166,8 @@ pub fn render_chat_view(
     update_scroll_offset(config, total_lines, list_height);
 
     // 渲染消息列表
-    let history = List::new(message_items)
-        .block(Block::default().title(" 对话历史 ").borders(Borders::ALL));
+    let history =
+        List::new(message_items).block(Block::default().title(" 对话历史 ").borders(Borders::ALL));
 
     *state.list_state.offset_mut() = config.scroll_offset;
     f.render_stateful_widget(history, area, &mut state.list_state);

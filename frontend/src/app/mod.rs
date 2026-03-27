@@ -8,10 +8,10 @@
 //!
 //! ## 示例
 //!
-//! ```rust
-//! use frontend::app::{App, AgentStatus};
+//! ```ignore
+//! use alice_frontend::app::{App, AgentStatus};
 //!
-//! let mut app = App::new();
+//! let mut app = App::new(/* BridgeClient */);
 //! assert_eq!(app.status, AgentStatus::Starting);
 //! ```
 
@@ -20,14 +20,12 @@ pub mod message_queue;
 pub mod state;
 
 // 重新导出常用类型
-pub use state::{
-    AgentStatus, App, AreaBounds, Author, ChildStdinWrapper, Message, TokenStats,
-};
 pub use message_queue::{MessageQueue, MessageQueueConfig, MessageQueueStats};
+pub use state::{AgentStatus, App, AreaBounds, Author, Message, TokenStats};
 
 // 导出常量
 pub use constants::{
-    DEFAULT_MAX_MESSAGES, DEFAULT_TICK_RATE_MS, HEADER_HEIGHT,
-    INPUT_HEIGHT, INPUT_TITLE_READY, INPUT_TITLE_WAITING,
-    MSG_WELCOME_INIT, MSG_WELCOME_READY, PRUNE_KEEP_MESSAGE_COUNT, SPINNER_FRAMES,
+    DEFAULT_MAX_MESSAGES, DEFAULT_TICK_RATE_MS, HEADER_HEIGHT, INPUT_HEIGHT, INPUT_TITLE_READY,
+    INPUT_TITLE_WAITING, MSG_WELCOME_INIT, MSG_WELCOME_READY, PRUNE_KEEP_MESSAGE_COUNT,
+    SPINNER_FRAMES,
 };

@@ -84,7 +84,7 @@ class ReActLoop:
     def __init__(
         self,
         config: Optional[ReActConfig] = None,
-        on Thinking: Optional[Callable[[str], None]] = None,
+        on_thinking: Optional[Callable[[str], None]] = None,
         on_content: Optional[Callable[[str], None]] = None,
     ):
         """初始化 ReAct 循环

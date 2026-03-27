@@ -113,7 +113,11 @@ class OrchestrationService:
         from backend.alice.infrastructure.docker.config import DockerConfig
 
         docker_config = DockerConfig(project_root=project_root)
-        docker_executor = DockerExecutor(config=docker_config)
+        docker_executor = DockerExecutor(
+            container_name=docker_config.container.name,
+            docker_image=docker_config.image_name,
+            work_dir=docker_config.container.work_dir,
+        )
 
         execution_service = ExecutionService(
             executor=docker_executor,

@@ -36,13 +36,11 @@ class DockerExecutor(BaseExecutor):
         self.docker_image = docker_image
         self.work_dir = work_dir
         self.default_timeout = default_timeout
+        self._docker_environment_ready = False
 
         # 加载默认安全规则
         for rule in DEFAULT_SECURITY_RULES:
             self.add_security_rule(rule)
-
-        # 确保 Docker 环境就绪
-        self._ensure_docker_environment()
 
     def _get_environment(self):
         """获取执行环境"""
@@ -60,6 +58,9 @@ class DockerExecutor(BaseExecutor):
         start_time = time.time()
 
         try:
+            if not self._docker_environment_ready:
+                self._ensure_docker_environment()
+
             full_command = self._build_docker_command(command)
 
             logger.info(f"执行指令 ({'Python' if command.type.value == 'python' else 'Bash'}): {command.raw[:200]}...")
@@ -124,6 +125,9 @@ class DockerExecutor(BaseExecutor):
 
         实现 Docker 引擎检查、镜像构建、容器启动的三阶段初始化
         """
+        if self._docker_environment_ready:
+            return
+
         try:
             # 1. 检查 Docker 引擎
             self._check_docker_engine()
@@ -133,6 +137,7 @@ class DockerExecutor(BaseExecutor):
 
             # 3. 启动常驻容器
             self._ensure_container_running()
+            self._docker_environment_ready = True
 
         except Exception as e:
             logger.error(f"初始化 Docker 环境失败: {e}")

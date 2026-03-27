@@ -56,6 +56,10 @@ class BaseWorkingMemoryStore(ABC):
     实现 WorkingMemoryStore 接口的基础功能。
     """
 
+    def __init__(self, file_path: str):
+        """初始化工作内存存储"""
+        self.file_path = file_path
+
     def add_round(self, round_entry: RoundEntry) -> None:
         """添加对话轮次（需要子类实现）"""
         raise NotImplementedError

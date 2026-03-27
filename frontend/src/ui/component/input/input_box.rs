@@ -3,10 +3,10 @@
 //! 处理用户输入的显示和光标定位。
 
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Color, Style},
     widgets::{Block, Borders, Paragraph},
-    Frame,
 };
 
 use unicode_width::UnicodeWidthStr;
@@ -53,19 +53,19 @@ pub fn render_input_box(f: &mut Frame, area: Rect, input: &str, config: &InputBo
 
     let input_paragraph = Paragraph::new(input)
         .style(Style::default().fg(color))
-        .block(Block::default().borders(Borders::ALL).title(title));
+        .block(Block::default().borders(Borders::ALL).title(title.as_str()));
 
     f.render_widget(input_paragraph, area);
 
     // 仅在启用状态下设置光标位置
     if config.enabled {
         let input_width = UnicodeWidthStr::width(input);
-        f.set_cursor(area.x + input_width as u16 + 1, area.y + 1);
+        f.set_cursor_position((area.x + input_width as u16 + 1, area.y + 1));
     }
 }
 
 /// 获取输入框建议高度
-pub const fn INPUT_HEIGHT: u16 = 3;
+pub const INPUT_HEIGHT: u16 = 3;
 
 #[cfg(test)]
 mod tests {

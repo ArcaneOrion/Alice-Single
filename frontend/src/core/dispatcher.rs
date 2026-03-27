@@ -8,6 +8,9 @@ use std::time::Duration;
 use crossterm::event::{self, Event as CrosstermEvent};
 use ratatui::layout::Rect;
 
+use crate::app::state::{AgentStatus as AppAgentStatus, App};
+use crate::bridge::protocol::message::{BridgeMessage, StatusContent};
+
 use super::event::{AppEvent, EventBus};
 use super::handler::{KeyAction, KeyboardHandler, MouseAction, MouseHandler};
 
@@ -48,6 +51,22 @@ pub struct EventDispatcher {
     state: AppState,
     /// 是否应退出
     should_quit: bool,
+}
+
+pub fn drain_bridge_messages(app: &mut App, dispatcher: &mut EventDispatcher) -> bool {
+    while let Some(msg_result) = app.bridge_client.try_recv_message() {
+        match msg_result {
+            Ok(msg) => dispatcher.handle_bridge_message(app, msg),
+            Err(err) => {
+                dispatcher.handle_bridge_error(app, format!("Backend connection lost: {}", err));
+                app.should_quit = true;
+                dispatcher.should_quit = true;
+                return false;
+            }
+        }
+    }
+
+    true
 }
 
 impl EventDispatcher {
@@ -95,7 +114,8 @@ impl EventDispatcher {
     /// 更新应用状态
     pub fn set_state(&mut self, state: AppState) {
         self.state = state;
-        self.keyboard.set_status(convert_state_to_agent_status(state));
+        self.keyboard
+            .set_status(convert_state_to_agent_status(state));
     }
 
     /// 更新侧边栏显示状态
@@ -205,11 +225,166 @@ impl EventDispatcher {
         }
     }
 
+    /// 处理来自后端桥接的消息
+    pub fn handle_bridge_message(&mut self, app: &mut App, msg: BridgeMessage) {
+        match msg {
+            BridgeMessage::Status { content } => {
+                app.bridge_client.handle_status_message(&content);
+                match content {
+                    StatusContent::Ready => {
+                        app.handle_ready();
+                        self.set_state(AppState::Idle);
+                    }
+                    StatusContent::Thinking => {
+                        app.set_thinking();
+                        self.set_state(AppState::Thinking);
+                    }
+                    StatusContent::ExecutingTool => {
+                        app.set_executing_tool();
+                        self.set_state(AppState::ExecutingTool);
+                    }
+                    StatusContent::Done => {
+                        app.mark_current_complete();
+                        app.set_idle();
+                        self.set_state(AppState::Idle);
+                    }
+                }
+            }
+            BridgeMessage::Thinking { content } => {
+                app.append_thinking(&content);
+                app.set_thinking();
+                self.set_state(AppState::Thinking);
+            }
+            BridgeMessage::Content { content } => {
+                app.append_content(&content);
+                app.set_responding();
+                self.set_state(AppState::Responding);
+            }
+            BridgeMessage::Tokens {
+                total,
+                prompt,
+                completion,
+            } => {
+                app.tokens.update(total, prompt, completion);
+            }
+            BridgeMessage::Error { content } => {
+                self.handle_bridge_error(app, content);
+            }
+            BridgeMessage::Interrupt => {}
+        }
+
+        self.set_show_thinking(app.show_thinking);
+    }
+
+    /// 处理来自后端桥接的错误
+    pub fn handle_bridge_error(&mut self, app: &mut App, err: String) {
+        app.mark_current_complete();
+        app.add_error(err.clone());
+        app.set_idle();
+        self.set_state(AppState::Idle);
+        eprintln!("Backend error: {}", err);
+    }
+
+    /// 处理键盘事件
+    pub fn handle_key_event(&mut self, app: &mut App, key: crossterm::event::KeyEvent) {
+        let action = self.keyboard.handle_crossterm_event(key);
+        self.apply_key_action(app, action);
+    }
+
+    /// 处理鼠标事件
+    pub fn handle_mouse_event(&mut self, app: &mut App, mouse: crossterm::event::MouseEvent) {
+        let action = self.mouse.handle_crossterm_event(mouse);
+        self.apply_mouse_action(app, action);
+    }
+
     /// 发送中断信号到后端
     ///
     /// 通过 child_stdin 发送 __INTERRUPT__ 信号
-    pub fn send_interrupt(&self, stdin: &mut std::process::ChildStdin) -> Result<(), std::io::Error> {
+    pub fn send_interrupt(
+        &self,
+        stdin: &mut std::process::ChildStdin,
+    ) -> Result<(), std::io::Error> {
         writeln!(stdin, "__INTERRUPT__")
+    }
+
+    fn apply_key_action(&mut self, app: &mut App, action: KeyAction) {
+        match action {
+            KeyAction::Quit => {
+                self.should_quit = true;
+                app.should_quit = true;
+            }
+            KeyAction::ToggleThinking => {
+                app.toggle_thinking();
+                self.set_show_thinking(app.show_thinking);
+            }
+            KeyAction::InputChar(ch) => {
+                if app.status.can_accept_input() {
+                    app.input.push(ch);
+                }
+            }
+            KeyAction::Backspace => {
+                app.input.pop();
+            }
+            KeyAction::SendMessage => {
+                app.send_message();
+                self.sync_from_app(app);
+            }
+            KeyAction::Interrupt => {
+                app.interrupt();
+                self.sync_from_app(app);
+            }
+            KeyAction::ScrollUp => {
+                self.active_scroll_state(app).scroll_up();
+            }
+            KeyAction::ScrollDown => {
+                self.active_scroll_state(app).scroll_down();
+            }
+            KeyAction::ScrollToTop => {
+                let scroll_state = self.active_scroll_state(app);
+                scroll_state.offset = 0;
+                scroll_state.auto_scroll = false;
+            }
+            KeyAction::ScrollToBottom => {
+                self.active_scroll_state(app).reset();
+            }
+            KeyAction::None => {}
+        }
+    }
+
+    fn apply_mouse_action(&mut self, app: &mut App, action: MouseAction) {
+        match action {
+            MouseAction::ChatScrollUp => {
+                app.chat_scroll.scroll_up();
+            }
+            MouseAction::ChatScrollDown => {
+                app.chat_scroll.scroll_down();
+            }
+            MouseAction::SidebarScrollUp => {
+                app.thinking_scroll.scroll_up();
+            }
+            MouseAction::SidebarScrollDown => {
+                app.thinking_scroll.scroll_down();
+            }
+            MouseAction::Click { .. } => {}
+            MouseAction::Drag { .. } => {}
+            MouseAction::None => {}
+        }
+    }
+
+    fn active_scroll_state<'a>(
+        &self,
+        app: &'a mut App,
+    ) -> &'a mut crate::core::event::types::ScrollState {
+        if self.keyboard.should_scroll_sidebar() {
+            &mut app.thinking_scroll
+        } else {
+            &mut app.chat_scroll
+        }
+    }
+
+    fn sync_from_app(&mut self, app: &App) {
+        self.set_state(convert_agent_status_to_app_state(app.status));
+        self.set_show_thinking(app.show_thinking);
     }
 }
 
@@ -220,13 +395,27 @@ impl Default for EventDispatcher {
 }
 
 /// 转换 AppState 到键盘处理器需要的 AgentStatus
-fn convert_state_to_agent_status(state: AppState) -> keyboard_handler::AgentStatus {
+fn convert_state_to_agent_status(
+    state: AppState,
+) -> crate::core::handler::keyboard_handler::AgentStatus {
     match state {
-        AppState::Starting => keyboard_handler::AgentStatus::Starting,
-        AppState::Idle => keyboard_handler::AgentStatus::Idle,
-        AppState::Thinking => keyboard_handler::AgentStatus::Thinking,
-        AppState::Responding => keyboard_handler::AgentStatus::Responding,
-        AppState::ExecutingTool => keyboard_handler::AgentStatus::ExecutingTool,
+        AppState::Starting => crate::core::handler::keyboard_handler::AgentStatus::Starting,
+        AppState::Idle => crate::core::handler::keyboard_handler::AgentStatus::Idle,
+        AppState::Thinking => crate::core::handler::keyboard_handler::AgentStatus::Thinking,
+        AppState::Responding => crate::core::handler::keyboard_handler::AgentStatus::Responding,
+        AppState::ExecutingTool => {
+            crate::core::handler::keyboard_handler::AgentStatus::ExecutingTool
+        }
+    }
+}
+
+fn convert_agent_status_to_app_state(status: AppAgentStatus) -> AppState {
+    match status {
+        AppAgentStatus::Starting => AppState::Starting,
+        AppAgentStatus::Idle => AppState::Idle,
+        AppAgentStatus::Thinking => AppState::Thinking,
+        AppAgentStatus::Responding => AppState::Responding,
+        AppAgentStatus::ExecutingTool => AppState::ExecutingTool,
     }
 }
 
@@ -288,6 +477,30 @@ impl EventLoop {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::mpsc;
+
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    use crate::app::state::{Author, Message};
+    use crate::bridge::client::BridgeClient;
+
+    fn create_app_and_dispatcher() -> (
+        App,
+        EventDispatcher,
+        mpsc::Sender<BridgeMessage>,
+        mpsc::Sender<String>,
+    ) {
+        let (msg_tx, msg_rx) = mpsc::channel();
+        let (err_tx, err_rx) = mpsc::channel();
+        let bridge_client = BridgeClient::with_test_channels(msg_rx, err_rx).unwrap();
+
+        (
+            App::new(bridge_client),
+            EventDispatcher::new(EventBus::new()),
+            msg_tx,
+            err_tx,
+        )
+    }
 
     #[test]
     fn test_app_state_can_accept_input() {
@@ -342,5 +555,186 @@ mod tests {
         dispatcher.set_show_thinking(true);
         // 测试是否正确设置（通过检查鼠标处理器）
         assert!(dispatcher.mouse().is_in_sidebar_area(100, 100) == false); // 默认区域
+    }
+
+    #[test]
+    fn test_handle_bridge_ready_updates_app() {
+        let (mut app, mut dispatcher, _msg_tx, _err_tx) = create_app_and_dispatcher();
+
+        dispatcher.handle_bridge_message(
+            &mut app,
+            BridgeMessage::Status {
+                content: StatusContent::Ready,
+            },
+        );
+
+        assert_eq!(app.status, AppAgentStatus::Idle);
+        assert_eq!(dispatcher.state(), AppState::Idle);
+        assert!(app.messages[0].content.contains("准备好了"));
+    }
+
+    #[test]
+    fn test_handle_bridge_stream_updates_message_and_completion() {
+        let (mut app, mut dispatcher, _msg_tx, _err_tx) = create_app_and_dispatcher();
+        app.handle_ready();
+        dispatcher.set_state(AppState::Idle);
+        app.messages.push(Message::assistant_pending());
+
+        dispatcher.handle_bridge_message(
+            &mut app,
+            BridgeMessage::Thinking {
+                content: "分析中".into(),
+            },
+        );
+        dispatcher.handle_bridge_message(
+            &mut app,
+            BridgeMessage::Content {
+                content: "你好".into(),
+            },
+        );
+
+        assert_eq!(app.status, AppAgentStatus::Responding);
+        assert_eq!(dispatcher.state(), AppState::Responding);
+        assert_eq!(app.messages.last().unwrap().thinking, "分析中");
+        assert_eq!(app.messages.last().unwrap().content, "你好");
+
+        dispatcher.handle_bridge_message(
+            &mut app,
+            BridgeMessage::Status {
+                content: StatusContent::Done,
+            },
+        );
+
+        assert_eq!(app.status, AppAgentStatus::Idle);
+        assert_eq!(dispatcher.state(), AppState::Idle);
+        assert!(app.messages.last().unwrap().is_complete);
+    }
+
+    #[test]
+    fn test_handle_bridge_error_updates_app() {
+        let (mut app, mut dispatcher, _msg_tx, _err_tx) = create_app_and_dispatcher();
+        app.handle_ready();
+        dispatcher.set_state(AppState::Idle);
+        app.messages.push(Message::assistant_pending());
+        app.set_responding();
+        dispatcher.set_state(AppState::Responding);
+
+        dispatcher.handle_bridge_message(
+            &mut app,
+            BridgeMessage::Error {
+                content: "boom".into(),
+            },
+        );
+
+        assert_eq!(app.status, AppAgentStatus::Idle);
+        assert_eq!(dispatcher.state(), AppState::Idle);
+        assert!(app.messages[1].is_complete);
+        assert!(app.messages.last().unwrap().content.contains("boom"));
+    }
+
+    #[test]
+    fn test_handle_bridge_tokens_updates_app() {
+        let (mut app, mut dispatcher, _msg_tx, _err_tx) = create_app_and_dispatcher();
+
+        dispatcher.handle_bridge_message(
+            &mut app,
+            BridgeMessage::Tokens {
+                total: 12,
+                prompt: 5,
+                completion: 7,
+            },
+        );
+
+        assert_eq!(app.tokens.total, 12);
+        assert_eq!(app.tokens.prompt, 5);
+        assert_eq!(app.tokens.completion, 7);
+    }
+
+    #[test]
+    fn test_handle_key_event_updates_input_and_sends_message() {
+        let (mut app, mut dispatcher, _msg_tx, _err_tx) = create_app_and_dispatcher();
+        app.handle_ready();
+        dispatcher.set_state(AppState::Idle);
+
+        dispatcher.handle_key_event(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('h'), KeyModifiers::empty()),
+        );
+        dispatcher.handle_key_event(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('i'), KeyModifiers::empty()),
+        );
+        dispatcher.handle_key_event(
+            &mut app,
+            KeyEvent::new(KeyCode::Backspace, KeyModifiers::empty()),
+        );
+        dispatcher.handle_key_event(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('!'), KeyModifiers::empty()),
+        );
+
+        assert_eq!(app.input, "h!");
+
+        dispatcher.handle_key_event(
+            &mut app,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+        );
+
+        assert!(app.input.is_empty());
+        assert_eq!(app.status, AppAgentStatus::Thinking);
+        assert_eq!(dispatcher.state(), AppState::Thinking);
+        assert_eq!(app.messages[1].author, Author::User);
+        assert_eq!(app.messages[1].content, "h!");
+        assert_eq!(app.messages.last().unwrap().author, Author::Assistant);
+        assert!(!app.messages.last().unwrap().is_complete);
+    }
+
+    #[test]
+    fn test_handle_key_event_toggle_scroll_and_quit() {
+        let (mut app, mut dispatcher, _msg_tx, _err_tx) = create_app_and_dispatcher();
+        app.handle_ready();
+        dispatcher.set_state(AppState::Idle);
+
+        dispatcher.handle_key_event(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL),
+        );
+        dispatcher.handle_key_event(
+            &mut app,
+            KeyEvent::new(KeyCode::Down, KeyModifiers::empty()),
+        );
+
+        assert!(app.show_thinking);
+        assert_eq!(app.thinking_scroll.offset, 1);
+        assert_eq!(app.chat_scroll.offset, 0);
+
+        dispatcher.handle_key_event(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        );
+
+        assert!(app.should_quit);
+        assert!(dispatcher.should_quit());
+    }
+
+    #[test]
+    fn test_drain_bridge_messages_stops_on_disconnect() {
+        let (msg_tx, msg_rx) = mpsc::channel::<BridgeMessage>();
+        let (_err_tx, err_rx) = mpsc::channel::<String>();
+        drop(msg_tx);
+        let bridge_client = BridgeClient::with_test_channels(msg_rx, err_rx).unwrap();
+        let mut app = App::new(bridge_client);
+        let mut dispatcher = EventDispatcher::new(EventBus::new());
+
+        assert!(!drain_bridge_messages(&mut app, &mut dispatcher));
+        assert!(app.should_quit);
+        assert!(dispatcher.should_quit());
+        assert!(
+            app.messages
+                .last()
+                .unwrap()
+                .content
+                .contains("Backend connection lost")
+        );
     }
 }

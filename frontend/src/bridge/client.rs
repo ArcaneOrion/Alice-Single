@@ -29,12 +29,11 @@
 //! }
 //! ```
 
-use std::sync::mpsc::Receiver;
-use std::process::ChildStdin;
+use std::sync::mpsc::{Receiver, TryRecvError};
 
-use crate::bridge::{BridgeError, BridgeResult};
-use crate::bridge::transport::stdio_transport::{ChildStdinWrapper, StdioTransport};
 use crate::bridge::protocol::message::{BridgeMessage, StatusContent};
+use crate::bridge::transport::stdio_transport::{ChildStdinWrapper, StdioTransport};
+use crate::bridge::{BridgeError, BridgeResult};
 
 /// Python 桥接客户端
 ///
@@ -74,9 +73,9 @@ impl BridgeClient {
     ///
     /// # 默认路径
     ///
-    /// `./tui_bridge.py`
+    /// `../backend/alice/cli/main.py`
     pub fn spawn_default() -> BridgeResult<Self> {
-        Self::spawn("./tui_bridge.py")
+        Self::spawn(&StdioTransport::default_bridge_path().to_string_lossy())
     }
 
     /// 创建并启动新的 Python 桥接客户端
@@ -127,8 +126,8 @@ impl BridgeClient {
     pub fn try_recv_message(&self) -> Option<Result<BridgeMessage, BridgeError>> {
         match self.message_rx.try_recv() {
             Ok(msg) => Some(Ok(msg)),
-            Err(mpsc::TryRecvError::Empty) => None,
-            Err(mpsc::TryRecvError::Disconnected) => Some(Err(BridgeError::ChannelClosed)),
+            Err(TryRecvError::Empty) => None,
+            Err(TryRecvError::Disconnected) => Some(Err(BridgeError::ChannelClosed)),
         }
     }
 
@@ -138,7 +137,9 @@ impl BridgeClient {
     ///
     /// 返回接收到的消息，或通道关闭错误。
     pub fn recv_message(&self) -> Result<BridgeMessage, BridgeError> {
-        self.message_rx.recv().map_err(|_| BridgeError::ChannelClosed)
+        self.message_rx
+            .recv()
+            .map_err(|_| BridgeError::ChannelClosed)
     }
 
     /// 尝试接收一条错误消息 (非阻塞)
@@ -190,6 +191,21 @@ impl BridgeClient {
         self.transport.kill()?;
         self.state = ClientState::Disconnected;
         Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_test_channels(
+        message_rx: Receiver<BridgeMessage>,
+        error_rx: Receiver<String>,
+    ) -> BridgeResult<Self> {
+        let transport = StdioTransport::spawn_test_transport()?;
+
+        Ok(Self {
+            transport,
+            message_rx,
+            error_rx,
+            state: ClientState::Connected,
+        })
     }
 }
 
