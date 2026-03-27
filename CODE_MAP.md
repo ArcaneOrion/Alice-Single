@@ -1,7 +1,7 @@
 # CODE_MAP.md - 代码地图
 
 > **用途**：Claude Code 改代码时的导航文件。定位代码、分析影响、同步更新。
-> **最后同步**：2026-03-26
+> **最后同步**：2026-03-27 20:12 (commit: 8276e61)
 > **维护规则**：每次修改代码后，运行 /code-map 同步，或手动更新受影响的行号和耦合关系。
 
 ---
@@ -240,34 +240,188 @@ Alice 采用 **DDD 分层架构** + **Rust TUI 前端**：
 
 ## L1 关键文件索引
 
-### src/main.rs (632 行)
+### frontend/src/bridge/protocol/message.rs
 
-**Rust TUI 主程序**
+**Bridge 协议消息定义**
 
 ```
-BridgeMessage [L25-33]
-├── Status { content: String }
+BridgeMessage [L33-55]
+├── Status { content: StatusContent }
 ├── Thinking { content: String }
 ├── Content { content: String }
 ├── Tokens { total, prompt, completion }
-└── Error { content: String }
+├── Error { content: String }
+└── Interrupt
 
-AgentStatus [L52-58]
-├── Starting, Idle, Thinking
-├── Responding, ExecutingTool
-
-App [L61-81]
-├── input, messages, status
-├── show_thinking, should_quit
-└── child_stdin: Option<ChildStdinWrapper>
-
-main() [L162-391]
-├── 启动 tui_bridge.py 子进程 [L164-169]
-├── stdout/stderr 线程 [L180-202]
-└── 事件循环 [L219-376]
+StatusContent [L76-88]
+├── Ready
+├── Thinking
+├── ExecutingTool
+└── Done
 ```
 
-**耦合点**：`backend/alice/infrastructure/bridge/protocol/messages.py`
+**耦合点**：
+- `backend/alice/infrastructure/bridge/protocol/messages.py`
+- `frontend/src/bridge/protocol/codec.rs`
+- `frontend/src/core/dispatcher.rs`
+
+---
+
+### frontend/src/bridge/transport/stdio_transport.rs
+
+**Python stdio 传输层**
+
+```
+ChildStdinWrapper [L35]
+StdioTransport [L61-220]
+├── DEFAULT_BRIDGE_PATH [L71]
+├── default_bridge_path() [L74-76]
+├── spawn() [L94-158]
+├── spawn_default() [L161-164]
+├── spawn_test_transport() [L167-186]
+├── send_text() [L197-200]
+├── send_interrupt() [L203-205]
+├── stdin()/stdin_mut() [L208-215]
+└── kill() [L218-220]
+
+StdioWriter [L226-247]
+├── new() [L232-236]
+├── send() [L239-241]
+└── interrupt() [L244-246]
+```
+
+**耦合点**：
+- `frontend/src/bridge/client.rs`
+- `backend/alice/cli/main.py`
+- 子进程 stdout/stderr JSON Lines 协议
+
+---
+
+### frontend/src/bridge/client.rs
+
+**桥接客户端**
+
+```
+BridgeClient [L41-210]
+├── spawn_default() [L77-79]
+├── spawn() [L90-99]
+├── send_input() [L106-109]
+├── send_interrupt() [L114-117]
+├── try_recv_message()/recv_message() [L126-143]
+├── try_recv_error() [L146-148]
+├── stdin()/stdin_mut() [L160-168]
+├── state()/set_state() [L171-178]
+├── handle_status_message() [L181-187]
+└── shutdown() [L190-194]
+
+ClientState [L57-69]
+├── Initial
+├── Connected
+├── Ready
+└── Disconnected
+```
+
+**耦合点**：
+- `frontend/src/bridge/transport/stdio_transport.rs`
+- `frontend/src/app/state.rs`
+- `frontend/src/main.rs`
+
+---
+
+### frontend/src/app/state.rs
+
+**应用状态模型**
+
+```
+Author [L13-18]
+Message [L22-63]
+AgentStatus [L74-101]
+TokenStats [L105-131]
+App [L136-328]
+├── new() [L209-226]
+├── send_message() [L232-254]
+├── on_tick() [L259-261]
+├── toggle_thinking() [L264-266]
+├── append_content() [L270-281]
+├── append_thinking() [L285-296]
+├── mark_last_message_complete() [L300-304]
+└── latest_thinking_content() [L307-328]
+
+AreaBounds [L167-205]
+SPINNER [L339]
+```
+
+**耦合点**：
+- `frontend/src/bridge/client.rs`
+- `frontend/src/core/dispatcher.rs`
+- `frontend/src/ui/screen.rs`
+
+---
+
+### frontend/src/core/event/types.rs
+
+**前端事件类型**
+
+```
+AppEvent [L12-24]
+KeyboardEvent [L27-35]
+MouseEvent [L38-46]
+KeyCode [L49-85]
+KeyModifiers [L88-112]
+MouseEventKind [L115-129]
+MouseButton [L132-140]
+UiArea [L143-153]
+ScrollState [L156-219]
+AreaBounds [L223-232]
+```
+
+**耦合点**：
+- `frontend/src/core/event/event_bus.rs`
+- `frontend/src/core/handler/keyboard_handler.rs`
+- `frontend/src/core/handler/mouse_handler.rs`
+
+---
+
+### frontend/src/core/event/event_bus.rs
+
+**事件总线**
+
+```
+EventBus [L12-73]
+├── new()/default() [L21-24, L69-73]
+├── sender()/receiver() [L27-34]
+├── send()/try_recv()/recv() [L37-49]
+├── recv_timeout() [L52-54]
+├── drain() [L57-61]
+└── has_pending() [L64-66]
+
+EventSender [L79-125]
+├── from_bus()/from_sender() [L85-94]
+├── send() [L97-99]
+├── send_key() [L102-114]
+├── send_tick() [L117-119]
+└── send_quit() [L122-124]
+```
+
+**耦合点**：
+- `frontend/src/core/event/types.rs`
+- `frontend/src/main.rs`
+
+---
+
+### frontend/src/ui/component/input/input_box.rs
+
+**输入框组件**
+
+```
+InputBoxConfig [L15-32]
+render_input_box() [L41-65]
+INPUT_HEIGHT [L68]
+```
+
+**耦合点**：
+- `frontend/src/ui/screen.rs`
+- `frontend/src/app/state.rs`
 
 ---
 
@@ -456,14 +610,16 @@ reset_container() [L196-198]
 
 ### 场景 1：Bridge 通信协议
 
-**触发条件**：修改消息类型或 JSON 格式
+**触发条件**：修改消息类型、状态值或 JSON Lines 格式
 
 **需要同步的文件**：
 | 文件 | 位置 |
 |------|------|
-| `src/main.rs` | L25-33 BridgeMessage enum |
+| `frontend/src/bridge/protocol/message.rs` | `BridgeMessage` / `StatusContent` |
+| `frontend/src/bridge/protocol/codec.rs` | 编解码逻辑 |
 | `backend/alice/infrastructure/bridge/protocol/messages.py` | 消息定义 |
 | `backend/alice/application/dto/responses.py` | 响应 DTO |
+| `frontend/src/core/dispatcher.rs` | 消息分发与状态更新 |
 
 ---
 
