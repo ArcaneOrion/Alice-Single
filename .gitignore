@@ -10,8 +10,16 @@ alice-ui/.vite/
 
 .clinerules
 
-memory/*.json
-memory/*.md
+memory/
 *.log
 /target/
-Cargo.lock
+frontend/target/
+.claude/settings.local.json
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.idea/
+.vscode/
