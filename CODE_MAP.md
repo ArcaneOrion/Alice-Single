@@ -1,7 +1,7 @@
 # CODE_MAP.md - 代码地图
 
 > **用途**：Claude Code 改代码时的导航文件。定位代码、分析影响、同步更新。
-> **最后同步**：2026-03-27 20:12 (commit: 8276e61)
+> **最后同步**：2026-03-27 (commit: 163eaf0)
 > **维护规则**：每次修改代码后，运行 /code-map 同步，或手动更新受影响的行号和耦合关系。
 
 ---
@@ -9,708 +9,522 @@
 ## 文件树
 
 ```
-Alice-Single/
-├── src/
-│   └── main.rs                           # Rust TUI 主程序（632 行）
-├── backend/alice/                         # Python 后端（新架构 DDD 分层）
-│   ├── __init__.py
-│   ├── application/                      # 应用层
-│   │   ├── __init__.py
-│   │   ├── agent/                        # Agent、ReAct 循环
-│   │   │   ├── __init__.py
-│   │   │   ├── agent.py                  # Agent 主控制器
-│   │   │   └── react_loop.py             # ReAct 循环引擎（254 行）
-│   │   ├── dto/                          # 数据传输对象
-│   │   │   ├── __init__.py
-│   │   │   ├── requests.py               # 请求 DTO（123 行）
-│   │   │   └── responses.py              # 响应 DTO（229 行）
-│   │   ├── services/                     # 应用服务
-│   │   │   ├── __init__.py
-│   │   │   ├── orchestration_service.py  # 编排服务
-│   │   │   └── lifecycle_service.py      # 生命周期服务
-│   │   └── workflow/                     # 工作流
-│   │       ├── __init__.py
-│   │       ├── base_workflow.py          # 工作流基类
-│   │       ├── chat_workflow.py          # 聊天工作流
-│   │       └── tool_workflow.py          # 工具执行工作流
-│   ├── domain/                           # 领域层（核心业务逻辑）
-│   │   ├── __init__.py
-│   │   ├── execution/                    # 命令执行域
-│   │   │   ├── __init__.py
-│   │   │   ├── builtin/                  # 内置命令
-│   │   │   │   ├── __init__.py
-│   │   │   │   ├── memory_command.py     # memory 命令
-│   │   │   │   ├── todo_command.py       # todo 命令
-│   │   │   │   └── toolkit_command.py    # toolkit 命令
-│   │   │   ├── executors/                # 执行器
-│   │   │   │   ├── __init__.py
-│   │   │   │   ├── base.py               # 执行器基类
-│   │   │   │   └── docker_executor.py    # Docker 执行器
-│   │   │   ├── models/                   # 领域模型
-│   │   │   │   ├── __init__.py
-│   │   │   │   ├── command.py            # 命令模型
-│   │   │   │   ├── execution_result.py   # 执行结果
-│   │   │   │   └── security_rule.py      # 安全规则
-│   │   │   └── services/                 # 领域服务
-│   │   │       ├── __init__.py
-│   │   │       ├── execution_service.py  # 执行服务（219 行）
-│   │   │       └── security_service.py   # 安全服务
-│   │   ├── llm/                          # LLM 服务域
-│   │   │   ├── __init__.py
-│   │   │   ├── models/                   # LLM 模型
-│   │   │   │   ├── __init__.py
-│   │   │   │   ├── message.py            # 消息模型
-│   │   │   │   ├── response.py           # 响应模型
-│   │   │   │   └── stream_chunk.py       # 流式块
-│   │   │   ├── parsers/                  # 解析器
-│   │   │   │   ├── __init__.py
-│   │   │   │   └── stream_parser.py      # 流式解析
-│   │   │   ├── providers/                # Provider 实现
-│   │   │   │   ├── __init__.py
-│   │   │   │   ├── base.py               # Provider 基类
-│   │   │   │   └── openai_provider.py    # OpenAI 兼容实现
-│   │   │   └── services/                 # LLM 服务
-│   │   │       ├── __init__.py
-│   │   │       ├── chat_service.py       # 聊天服务
-│   │   │       └── stream_service.py     # 流式服务
-│   │   ├── memory/                       # 内存管理域
-│   │   │   ├── __init__.py
-│   │   │   ├── models/                   # 内存模型
-│   │   │   │   ├── __init__.py
-│   │   │   │   ├── memory_entry.py       # 记忆条目
-│   │   │   │   └── round_entry.py        # 对话轮次
-│   │   │   ├── repository/               # 内存仓储
-│   │   │   │   ├── __init__.py
-│   │   │   │   └── file_repository.py    # 文件仓储
-│   │   │   ├── services/                 # 内存服务
-│   │   │   │   ├── __init__.py
-│   │   │   │   ├── distiller.py          # 记忆提炼
-│   │   │   │   └── memory_manager.py     # 内存管理器（218 行）
-│   │   │   └── stores/                   # 内存存储
-│   │   │       ├── __init__.py
-│   │   │       ├── base.py               # 存储基类
-│   │   │       ├── ltm_store.py          # 长期记忆存储
-│   │   │       ├── stm_store.py          # 短期记忆存储
-│   │   │       └── working_store.py      # 工作内存存储
-│   │   └── skills/                       # 技能管理域
-│   │       ├── __init__.py
-│   │       ├── loaders/                  # 技能加载器
-│   │       │   ├── __init__.py
-│   │       │   ├── base.py               # 加载器基类
-│   │       │   ├── cache_loader.py       # 缓存加载器
-│   │       │   └── directory_loader.py   # 目录扫描
-│   │       ├── models/                   # 技能模型
-│   │       │   ├── __init__.py
-│   │       │   ├── skill.py              # 技能模型
-│   │       │   └── skill_metadata.py     # 元数据模型
-│   │       ├── repository/               # 技能仓储
-│   │       │   ├── __init__.py
-│   │       │   └── file_repository.py    # 文件仓储
-│   │       └── services/                 # 技能服务
-│   │           ├── __init__.py
-│   │           ├── skill_cache.py        # 技能缓存
-│   │           └── skill_registry.py     # 技能注册表
-│   ├── infrastructure/                   # 基础设施层
-│   │   ├── __init__.py
-│   │   ├── bridge/                       # Bridge 通信
-│   │   │   ├── __init__.py
-│   │   │   ├── server.py                 # 桥接服务器
-│   │   │   ├── stream_manager.py         # 流式管理器
-│   │   │   ├── event_handlers/           # 事件处理器
-│   │   │   │   ├── __init__.py
-│   │   │   │   ├── interrupt_handler.py # 中断处理
-│   │   │   │   └── message_handler.py   # 消息处理
-│   │   │   ├── protocol/                 # 协议定义
-│   │   │   │   ├── __init__.py
-│   │   │   │   ├── codec.py             # 编解码
-│   │   │   │   └── messages.py          # 协议消息（124 行）
-│   │   │   └── transport/                # 传输层
-│   │   │       ├── __init__.py
-│   │   │       ├── transport_trait.py   # 传输抽象
-│   │   │       └── stdio_transport.py   # stdin/stdout 实现
-│   │   ├── cache/                        # 缓存层
-│   │   │   └── __init__.py
-│   │   ├── docker/                       # Docker 管理
-│   │   │   ├── __init__.py
-│   │   │   ├── client.py                # Docker 客户端
-│   │   │   ├── config.py                # Docker 配置
-│   │   │   ├── container_manager.py     # 容器管理
-│   │   │   └── image_builder.py         # 镜像构建
-│   │   └── logging/                      # 日志配置
-│   │       └── __init__.py
-│   └── core/                             # 核心层
-│       ├── __init__.py
-│       ├── config/                       # 配置管理
-│       │   ├── __init__.py
-│       │   ├── loader.py                 # 配置加载
-│       │   └── settings.py               # 配置类（96 行）
-│       ├── container/                    # 依赖注入
-│       │   ├── __init__.py
-│       │   ├── container.py             # DI 容器（201 行）
-│       │   └── decorators.py            # 装饰器
-│       ├── event_bus/                    # 事件总线
-│       │   ├── __init__.py
-│       │   ├── event.py                 # 事件定义
-│       │   ├── event_bus.py             # 事件总线
-│       │   └── handler_trait.py         # 处理器接口
-│       ├── exceptions/                   # 异常定义
-│       │   ├── __init__.py
-│       │   ├── base.py                  # 异常基类
-│       │   ├── config_errors.py         # 配置异常
-│       │   ├── execution_errors.py      # 执行异常
-│       │   ├── llm_errors.py            # LLM 异常
-│       │   └── memory_errors.py         # 内存异常
-│       ├── interfaces/                   # 核心接口
-│       │   ├── __init__.py
-│       │   ├── command_executor.py      # 命令执行接口
-│       │   ├── llm_provider.py          # LLM 接口（60 行）
-│       │   ├── memory_store.py          # 内存存储接口
-│       │   └── skill_loader.py          # 技能加载接口
-│       ├── logging/                      # 日志配置
-│       │   ├── __init__.py
-│       │   ├── configure.py             # 日志配置
-│       │   └── formatters.py            # 格式化器
-│       └── registry/                     # 注册表
-│           ├── __init__.py
-│           ├── command_registry.py      # 命令注册表
-│           ├── llm_registry.py          # LLM 注册表
-│           ├── memory_registry.py       # 内存注册表
-│           └── skill_registry.py        # 技能注册表
-├── agent.py                               # 旧版入口（兼容）
-├── tui_bridge.py                          # 桥接层入口（366 行）
-├── snapshot_manager.py                    # 技能快照管理器（138 行）
-├── config.py                              # 旧版配置（41 行）
-├── request_headers.py                     # 请求头轮换
+.
+├── frontend/                   # Rust TUI 前端 (~3719 行)
+│   └── src/
+│       ├── main.rs             # 应用入口，主事件循环
+│       ├── app/
+│       │   ├── state.rs        # 应用状态结构体（Message, AgentStatus, App）
+│       │   ├── message_queue.rs
+│       │   ├── constants.rs
+│       │   └── mod.rs
+│       ├── bridge/             # Python 桥接层
+│       │   ├── client.rs       # Python 子进程管理
+│       │   ├── protocol/
+│       │   │   ├── message.rs  # BridgeMessage 枚举定义
+│       │   │   └── codec.rs
+│       │   └── transport/
+│       │       └── stdio_transport.rs
+│       ├── core/
+│       │   ├── dispatcher.rs   # 事件分发器
+│       │   └── handler/
+│       │       ├── keyboard_handler.rs
+│       │       └── mouse_handler.rs
+│       └── ui/                 # TUI 渲染组件
+│           ├── screen.rs
+│           └── component/
+│               ├── chat/
+│               ├── header/
+│               ├── sidebar/
+│               └── input/
+├── backend/                    # Python 引擎后端 (~13155 行)
+│   └── alice/
+│       ├── application/
+│       │   ├── agent/
+│       │   │   ├── agent.py    # AliceAgent 核心类
+│       │   │   └── react_loop.py  # ReAct 循环引擎
+│       │   ├── dto/            # 数据传输对象
+│       │   ├── services/       # 应用服务
+│       │   └── workflow/       # 工作流
+│       ├── cli/
+│       │   └── main.py         # CLI 入口
+│       ├── core/
+│       │   ├── config/         # 配置管理
+│       │   ├── container/      # 依赖注入容器
+│       │   ├── event_bus/      # 事件总线
+│       │   ├── exceptions/     # 异常定义
+│       │   ├── interfaces/     # 核心接口
+│       │   ├── logging/        # 日志配置
+│       │   └── registry/       # 注册表（命令、技能、内存）
+│       ├── domain/
+│       │   ├── execution/      # 命令执行域
+│       │   ├── llm/            # LLM 服务域
+│       │   ├── memory/         # 内存管理域
+│       │   └── skills/         # 技能系统域
+│       └── infrastructure/
+│           ├── bridge/         # Bridge 桥接层
+│           │   ├── server.py   # BridgeServer 核心
+│           │   ├── protocol/
+│           │   │   └── messages.py  # 消息类型定义
+│           │   └── stream_manager.py
+│           ├── docker/         # Docker 客户端
+│           └── cache/          # 缓存实现
 ├── protocols/
-│   └── shared_types.py                    # 共享类型定义
-├── Cargo.toml                             # Rust 项目配置
-├── requirements.txt                       # Python 依赖
-├── Dockerfile.sandbox                     # 沙盒镜像定义
-├── .env.example                           # 环境变量模板
-├── CLAUDE.md                              # 开发指南
-├── README.md                              # 项目说明
-├── ARCHITECTURE.md                        # 架构文档
-├── API.md                                 # API 文档
-├── CODE_MAP.md                            # 本文件
-├── prompts/
-│   └── alice.md                          # Alice 系统提示词
-├── memory/                               # 四层内存文件
-│   ├── alice_memory.md                   # 长期记忆
-│   ├── short_term_memory.md              # 短期记忆（7 天）
-│   ├── working_memory.md                 # 即时记忆（30 轮）
-│   └── todo.md                           # 任务清单
-├── skills/                               # 技能插件目录（18+ 个）
-│   ├── akshare/                          # AKShare 财经数据
-│   ├── artifacts-builder/                # HTML 工件构建
-│   ├── brand-guidelines/                 # 品牌规范
-│   ├── docx/                             # Word 文档
-│   ├── fetch/                            # 网页抓取
-│   ├── file_explorer/                    # 文件浏览
-│   ├── internal-comms/                   # 通信模板
-│   ├── market-research-html/             # 市场调研
-│   ├── mcp-builder/                      # MCP 服务器
-│   ├── pdf/                              # PDF 处理
-│   ├── playwright_browser/               # 浏览器自动化
-│   ├── pptx/                             # PPT 处理
-│   ├── skill-creator/                    # 技能创建
-│   ├── slack-gif-creator/                # Slack GIF
-│   ├── tavily/                           # Tavily 搜索
-│   ├── template-skill/                   # 技能模板
-│   ├── weather/                          # 天气查询
-│   ├── weibo/                            # 微博热榜
-│   └── xlsx/                             # Excel 处理
-└── alice_output/                         # 容器输出目录
+│   ├── shared_types.py         # 共享协议类型定义
+│   └── bridge_schema.json
+├── prompts/alice.md            # Agent 人设提示词
+├── memory/                     # 内存文件目录
+├── skills/                     # 技能插件目录
+├── Dockerfile.sandbox          # 沙盒容器镜像
+└── requirements.txt
 ```
 
 ---
 
 ## L0 系统总览
 
-Alice 采用 **DDD 分层架构** + **Rust TUI 前端**：
+**Alice-Single** 是一个基于 ReAct 模式的多语言智能体框架，采用三层隔离架构：
 
-| 层级 | 目录 | 职责 |
-|------|------|------|
-| **Frontend** | `src/main.rs` | Rust TUI、用户界面渲染 |
-| **Infrastructure** | `backend/alice/infrastructure/` | Bridge、Docker、缓存 |
-| **Application** | `backend/alice/application/` | 工作流、ReAct 循环、DTO |
-| **Domain** | `backend/alice/domain/` | 内存、LLM、执行、技能 |
-| **Core** | `backend/alice/core/` | DI 容器、事件总线、接口 |
+| 层级 | 语言 | 模块 | 职责 |
+|------|------|------|------|
+| **TUI 层** | Rust | `frontend/` | 用户界面、交互、渲染 |
+| **引擎层** | Python | `backend/alice/` | 状态机、内存管理、LLM 调用 |
+| **沙盒层** | Docker | `Dockerfile.sandbox` | 安全执行环境、技能运行 |
 
----
-
-## L1 关键文件索引
-
-### frontend/src/bridge/protocol/message.rs
-
-**Bridge 协议消息定义**
-
-```
-BridgeMessage [L33-55]
-├── Status { content: StatusContent }
-├── Thinking { content: String }
-├── Content { content: String }
-├── Tokens { total, prompt, completion }
-├── Error { content: String }
-└── Interrupt
-
-StatusContent [L76-88]
-├── Ready
-├── Thinking
-├── ExecutingTool
-└── Done
-```
-
-**耦合点**：
-- `backend/alice/infrastructure/bridge/protocol/messages.py`
-- `frontend/src/bridge/protocol/codec.rs`
-- `frontend/src/core/dispatcher.rs`
+**核心通信流**：`Rust TUI <--(JSON stdin/stdout)--> Python Bridge --> ReAct Loop --> LLM/Tools`
 
 ---
 
-### frontend/src/bridge/transport/stdio_transport.rs
+## L1 文件 -> 类/函数
 
-**Python stdio 传输层**
+### frontend/src/main.rs (122 行)
 
-```
-ChildStdinWrapper [L35]
-StdioTransport [L61-220]
-├── DEFAULT_BRIDGE_PATH [L71]
-├── default_bridge_path() [L74-76]
-├── spawn() [L94-158]
-├── spawn_default() [L161-164]
-├── spawn_test_transport() [L167-186]
-├── send_text() [L197-200]
-├── send_interrupt() [L203-205]
-├── stdin()/stdin_mut() [L208-215]
-└── kill() [L218-220]
-
-StdioWriter [L226-247]
-├── new() [L232-236]
-├── send() [L239-241]
-└── interrupt() [L244-246]
-```
+**入口函数**：
+- `main() [L43]` - 主函数，启动 Python 后端，初始化 TUI，运行事件循环
 
 **耦合点**：
-- `frontend/src/bridge/client.rs`
-- `backend/alice/cli/main.py`
-- 子进程 stdout/stderr JSON Lines 协议
+| 改动 | 必须同步 | 原因 |
+|------|---------|------|
+| 启动 Python 路径 | `BridgeClient::spawn_default()` | 硬编码相对路径 |
 
 ---
 
-### frontend/src/bridge/client.rs
+### frontend/src/app/state.rs (473 行)
 
-**桥接客户端**
-
-```
-BridgeClient [L41-210]
-├── spawn_default() [L77-79]
-├── spawn() [L90-99]
-├── send_input() [L106-109]
-├── send_interrupt() [L114-117]
-├── try_recv_message()/recv_message() [L126-143]
-├── try_recv_error() [L146-148]
-├── stdin()/stdin_mut() [L160-168]
-├── state()/set_state() [L171-178]
-├── handle_status_message() [L181-187]
-└── shutdown() [L190-194]
-
-ClientState [L57-69]
-├── Initial
-├── Connected
-├── Ready
-└── Disconnected
-```
+**核心类型**：
+- `Message [L22]` - 单条消息结构
+  - `Message::user() [L35]` - 创建用户消息
+  - `Message::assistant() [L45]` - 创建助手消息
+  - `Message::assistant_pending() [L55]` - 创建流式响应占位
+- `Author [L12]` - 消息作者枚举
+- `AgentStatus [L74]` - Agent 运行状态（Starting/Idle/Thinking/Responding/ExecutingTool）
+- `TokenStats [L105]` - Token 统计
+- `App [L136]` - 应用状态核心结构体
+  - `App::new() [L188]` - 创建应用状态
+  - `App::send_message() [L211]` - 发送用户消息
+  - `App::append_thinking() [L248]` - 添加思考内容
+  - `App::append_content() [L257]` - 添加正文内容
+  - `App::handle_ready() [L310]` - 处理就绪状态
+  - `App::interrupt() [L320]` - 发送中断信号
 
 **耦合点**：
-- `frontend/src/bridge/transport/stdio_transport.rs`
-- `frontend/src/app/state.rs`
-- `frontend/src/main.rs`
+| 改动 | 必须同步 | 原因 |
+|------|---------|------|
+| Message 结构 | `bridge/protocol/message.rs::BridgeMessage` | JSON 序列化格式必须一致 |
+| AgentStatus 变体 | `core/dispatcher.rs::AppState` | 状态转换逻辑依赖 |
 
 ---
 
-### frontend/src/app/state.rs
+### frontend/src/bridge/protocol/message.rs (171 行)
 
-**应用状态模型**
-
-```
-Author [L13-18]
-Message [L22-63]
-AgentStatus [L74-101]
-TokenStats [L105-131]
-App [L136-328]
-├── new() [L209-226]
-├── send_message() [L232-254]
-├── on_tick() [L259-261]
-├── toggle_thinking() [L264-266]
-├── append_content() [L270-281]
-├── append_thinking() [L285-296]
-├── mark_last_message_complete() [L300-304]
-└── latest_thinking_content() [L307-328]
-
-AreaBounds [L167-205]
-SPINNER [L339]
-```
+**核心类型**：
+- `BridgeMessage [L33]` - Bridge 通信消息枚举
+  - `Status { content }` - 状态更新
+  - `Thinking { content }` - 思考内容
+  - `Content { content }` - 正文内容
+  - `Tokens { total, prompt, completion }` - Token 统计
+  - `Error { content }` - 错误消息
+  - `Interrupt` - 中断信号
+- `StatusContent [L76]` - 状态内容枚举（Ready/Thinking/ExecutingTool/Done）
 
 **耦合点**：
-- `frontend/src/bridge/client.rs`
-- `frontend/src/core/dispatcher.rs`
-- `frontend/src/ui/screen.rs`
+| 改动 | 必须同步 | 原因 |
+|------|---------|------|
+| BridgeMessage 变体 | `backend/alice/infrastructure/bridge/protocol/messages.py` | **跨语言协议** |
+| StatusContent 值 | `backend/alice/infrastructure/bridge/protocol/messages.py::StatusType` | JSON 值必须匹配 |
+| JSON tag 字段名 | `protocols/bridge_schema.json` | 序列化格式约定 |
 
 ---
 
-### frontend/src/core/event/types.rs
+### frontend/src/bridge/client.rs (223 行)
 
-**前端事件类型**
-
-```
-AppEvent [L12-24]
-KeyboardEvent [L27-35]
-MouseEvent [L38-46]
-KeyCode [L49-85]
-KeyModifiers [L88-112]
-MouseEventKind [L115-129]
-MouseButton [L132-140]
-UiArea [L143-153]
-ScrollState [L156-219]
-AreaBounds [L223-232]
-```
+**核心类型**：
+- `BridgeClient [L41]` - Python 桥接客户端
+  - `spawn_default() [L77]` - 使用默认路径启动
+  - `spawn(bridge_path) [L90]` - 指定路径启动
+  - `send_input() [L106]` - 发送用户输入
+  - `send_interrupt() [L114]` - 发送中断信号
+  - `try_recv_message() [L126]` - 非阻塞接收消息
+  - `shutdown() [L190]` - 终止 Python 进程
+- `ClientState [L56]` - 客户端状态
 
 **耦合点**：
-- `frontend/src/core/event/event_bus.rs`
-- `frontend/src/core/handler/keyboard_handler.rs`
-- `frontend/src/core/handler/mouse_handler.rs`
+| 改动 | 必须同步 | 原因 |
+|------|---------|------|
+| 默认 bridge 路径 | `main.rs` | 相对路径约定 |
+| 中断信号字符串 | `backend/alice/infrastructure/bridge/protocol/messages.py::INTERRUPT_SIGNAL` | 信号约定 |
 
 ---
 
-### frontend/src/core/event/event_bus.rs
+### frontend/src/core/dispatcher.rs (741 行)
 
-**事件总线**
-
-```
-EventBus [L12-73]
-├── new()/default() [L21-24, L69-73]
-├── sender()/receiver() [L27-34]
-├── send()/try_recv()/recv() [L37-49]
-├── recv_timeout() [L52-54]
-├── drain() [L57-61]
-└── has_pending() [L64-66]
-
-EventSender [L79-125]
-├── from_bus()/from_sender() [L85-94]
-├── send() [L97-99]
-├── send_key() [L102-114]
-├── send_tick() [L117-119]
-└── send_quit() [L122-124]
-```
+**核心类型**：
+- `EventDispatcher [L43]` - 事件分发器
+  - `new() [L74]` - 创建分发器
+  - `handle_bridge_message() [L229]` - 处理后端消息
+  - `handle_key_event() [L289]` - 处理键盘事件
+  - `handle_mouse_event() [L295]` - 处理鼠标事件
+  - `send_interrupt() [L303]` - 发送中断信号
+- `AppState [L19]` - 应用状态枚举（与 AgentStatus 对应）
+- `drain_bridge_messages() [L56]` - 排空后端消息队列（公开函数）
 
 **耦合点**：
-- `frontend/src/core/event/types.rs`
-- `frontend/src/main.rs`
+| 改动 | 必须同步 | 原因 |
+|------|---------|------|
+| BridgeMessage 匹配 | `bridge/protocol/message.rs` | 消息类型匹配 |
+| AppState 状态转换 | `app/state.rs::AgentStatus` | 状态同步 |
 
 ---
 
-### frontend/src/ui/component/input/input_box.rs
+### backend/alice/application/agent/agent.py (229 行)
 
-**输入框组件**
-
-```
-InputBoxConfig [L15-32]
-render_input_box() [L41-65]
-INPUT_HEIGHT [L68]
-```
-
-**耦合点**：
-- `frontend/src/ui/screen.rs`
-- `frontend/src/app/state.rs`
-
----
-
-### backend/alice/infrastructure/bridge/protocol/messages.py (124 行)
-
-**Bridge 协议定义**
-
-```
-MessageType [L15-22]
-├── STATUS, THINKING, CONTENT
-├── TOKENS, ERROR, INTERRUPT
-
-StatusType [L25-30]
-├── READY, THINKING, EXECUTING_TOOL, DONE
-
-StatusMessage [L40-43]
-ThinkingMessage [L47-50]
-ContentMessage [L54-57]
-TokensMessage [L61-66]
-ErrorMessage [L70-74]
-InterruptMessage [L78-80]
-
-BridgeMessage = Union[所有消息类型]
-INTERRUPT_SIGNAL = "__INTERRUPT__"
-```
+**核心类型**：
+- `AliceAgent [L29]` - Agent 核心类
+  - `__init__() [L39]` - 初始化（注入服务）
+  - `status() [L67]` - 获取状态
+  - `process() [L82]` - 处理请求（核心 ReAct 循环）
+  - `chat() [L130]` - 聊天接口
+  - `interrupt() [L147]` - 中断执行
+  - `get_status() [L161]` - 获取状态摘要
+  - `refresh_skills() [L188]` - 刷新技能注册表
+  - `manage_memory() [L198]` - 管理内存滚动
+  - `clear_working_memory() [L208]` - 清空工作内存
+  - `shutdown() [L213]` - 关闭 Agent
 
 **耦合点**：
-- `src/main.rs` BridgeMessage enum
-- 所有发送消息到 Rust 的代码
+| 改动 | 必须同步 | 原因 |
+|------|---------|------|
+| 依赖注入字段 | `backend/alice/core/container/container.py` | 容器注册键名 |
+| 输出消息格式 | `frontend/src/bridge/protocol/message.rs` | **跨语言协议** |
 
 ---
 
 ### backend/alice/application/agent/react_loop.py (254 行)
 
-**ReAct 循环引擎**
-
-```
-ReActConfig [L30-41]
-├── max_iterations: int = 10
-├── enable_thinking: bool = True
-└── timeout_seconds: int = 300
-
-ReActState [L45-62]
-├── iteration, phase
-├── full_content, full_thinking
-├── tool_calls_found, interrupted
-
-ReActLoop [L74-247]
-├── should_continue() [L111-121]
-├── start_iteration() [L123-127]
-├── transition_to_*() [L129-144]
-├── interrupt() [L141-144]
-├── emit_thinking() [L147-159]
-├── emit_content() [L161-173]
-├── emit_tokens() [L175-188]
-├── emit_status() [L190-199]
-├── emit_executing_tool() [L201-212]
-├── emit_done() [L214-220]
-└── emit_error() [L222-232]
-```
+**核心类型**：
+- `ReActLoop [L74]` - ReAct 循环引擎
+  - `should_continue() [L111]` - 判断是否继续
+  - `start_iteration() [L123]` - 开始新迭代
+  - `emit_thinking() [L147]` - 发送思考内容
+  - `emit_content() [L161]` - 发送正文内容
+  - `emit_tokens() [L175]` - 发送 Token 统计
+  - `emit_status() [L190]` - 发送状态更新
+  - `emit_executing_tool() [L201]` - 发送工具执行通知
+  - `interrupt() [L141]` - 中断循环
+- `ReActConfig [L29]` - 循环配置
+- `ReActState [L45]` - 循环状态
 
 **耦合点**：
-- `backend/alice/application/dto/responses.py`
-- `backend/alice/domain/llm/`
-- `backend/alice/domain/execution/`
-
----
-
-### backend/alice/core/config/settings.py (96 行)
-
-**配置管理**
-
-```
-LLMConfig [L13-21]
-├── model_name, api_key, base_url
-├── max_tokens, temperature
-└── enable_thinking, timeout
-
-MemoryConfig [L25-33]
-├── working_memory_max_rounds: int = 30
-├── stm_expiry_days: int = 7
-├── ltm_auto_distill: bool = True
-└── 路径配置
-
-DockerConfig [L37-45]
-├── image_name, container_name, work_dir
-├── mounts: Dict[str, str]
-└── timeout: int = 120
-
-Settings [L78-96]
-├── llm, memory, docker
-├── logging, bridge, security
-└── project_root, paths
-```
-
-**耦合点**：
-- `.env` 环境变量
-- 所有使用配置的模块
-
----
-
-### backend/alice/domain/memory/services/memory_manager.py (218 行)
-
-**内存管理器**
-
-```
-MemoryManager [L19-217]
-├── __init__() [L26-56]
-├── add_working_round() [L58-64]
-├── add_stm_entry() [L66-75]
-├── add_ltm_entry() [L77-85]
-├── get_working_content() [L87-93]
-├── get_stm_content() [L95-101]
-├── get_ltm_content() [L103-109]
-├── get_recent_rounds() [L111-120]
-├── search_stm() [L122-132]
-├── search_ltm() [L134-144]
-├── manage_memory() [L146-180]
-├── trim_working_memory() [L182-190]
-├── clear_*() [L192-202]
-└── get_memory_summary() [L204-215]
-```
-
-**耦合点**：
-- `backend/alice/domain/memory/stores/`
-- `backend/alice/domain/memory/repository/`
-- `memory/` 文件目录
+| 改动 | 必须同步 | 原因 |
+|------|---------|------|
+| ApplicationResponse 类型 | `backend/alice/application/dto/responses.py` | 响应类型契约 |
 
 ---
 
 ### backend/alice/domain/execution/services/execution_service.py (219 行)
 
-**执行服务**
-
-```
-ExecutionService [L23-218]
-├── __init__() [L29-48]
-├── execute() [L50-84]
-├── _try_handle_builtin() [L86-105]
-├── _try_handle_cat_skills() [L107-127]
-├── _handle_*() [L129-195]
-│   ├── toolkit
-│   ├── update_prompt
-│   ├── todo
-│   └── memory
-├── validate() [L196-205]
-├── add_security_rule() [L207-209]
-└── interrupt() [L211-213]
-```
+**核心类型**：
+- `ExecutionService [L23]` - 命令执行服务
+  - `execute() [L50]` - 执行命令（内置拦截 + Docker）
+  - `_try_handle_builtin() [L86]` - 尝试处理内置命令
+  - `_try_handle_cat_skills() [L107]` - 拦截 cat skills/*（缓存优化）
+  - `_handle_toolkit() [L129]` - 处理 toolkit 命令
+  - `_handle_update_prompt() [L133]` - 处理 update_prompt 命令
+  - `_handle_todo() [L142]` - 处理 todo 命令
+  - `_handle_memory() [L158]` - 处理 memory 命令
+  - `validate() [L196]` - 验证命令安全性
 
 **耦合点**：
-- `backend/alice/domain/execution/executors/`
-- `backend/alice/domain/execution/builtin/`
-- `snapshot_manager.py` 缓存
+| 改动 | 必须同步 | 原因 |
+|------|---------|------|
+| 内置命令名称 | `prompts/alice.md` | 提示词中可用的命令列表 |
+| cat skills 拦截正则 | `backend/alice/domain/skills/loaders/cache_loader.py` | 缓存读取路径约定 |
 
 ---
 
-### backend/alice/core/container/container.py (201 行)
+### backend/alice/domain/llm/providers/openai_provider.py (269 行)
 
-**依赖注入容器**
-
-```
-ServiceDescriptor [L16-22]
-├── interface, implementation
-├── is_singleton, instance, factory
-
-Container [L25-183]
-├── register_singleton() [L46-69]
-├── register_factory() [L71-89]
-├── register_transient() [L91-108]
-├── get() [L110-147]
-├── _create_instance() [L149-173]
-├── has() [L175-177]
-└── clear() [L179-182]
-
-get_container() [L189-193]
-reset_container() [L196-198]
-```
+**核心类型**：
+- `OpenAIProvider [L122]` - OpenAI API 兼容 LLM 提供商
+  - `client [L143]` - 延迟初始化的 OpenAI 客户端
+  - `_make_chat_request() [L166]` - 执行聊天请求
+  - `_extract_stream_chunks() [L208]` - 提取流式数据块
+  - `count_tokens() [L224]` - 计算 Token 数量
+- `OpenAIConfig [L91]` - Provider 配置
+- `RequestHeaderRotator [L71]` - 请求头轮换器
 
 **耦合点**：
-- 所有使用依赖注入的模块
+| 改动 | 必须同步 | 原因 |
+|------|---------|------|
+| API 响应解析 | `backend/alice/domain/llm/parsers/stream_parser.py` | 流式解析器契约 |
 
 ---
 
-## L2 跨文件耦合
+### backend/alice/domain/memory/services/memory_manager.py (218 行)
 
-### 场景 1：Bridge 通信协议
+**核心类型**：
+- `MemoryManager [L19]` - 内存管理器
+  - `add_working_round() [L58]` - 添加工作内存对话轮次
+  - `add_stm_entry() [L66]` - 添加短期记忆
+  - `add_ltm_entry() [L77]` - 添加长期记忆
+  - `get_working_content() [L87]` - 获取工作内存文本
+  - `manage_memory() [L146]` - 管理短期记忆滚动和提炼
+  - `trim_working_memory() [L182]` - 裁剪工作内存
+  - `clear_working_memory() [L192]` - 清空工作内存
 
-**触发条件**：修改消息类型、状态值或 JSON Lines 格式
-
-**需要同步的文件**：
-| 文件 | 位置 |
-|------|------|
-| `frontend/src/bridge/protocol/message.rs` | `BridgeMessage` / `StatusContent` |
-| `frontend/src/bridge/protocol/codec.rs` | 编解码逻辑 |
-| `backend/alice/infrastructure/bridge/protocol/messages.py` | 消息定义 |
-| `backend/alice/application/dto/responses.py` | 响应 DTO |
-| `frontend/src/core/dispatcher.rs` | 消息分发与状态更新 |
-
----
-
-### 场景 2：内置命令拦截
-
-**触发条件**：新增或修改内置命令
-
-**需要同步的文件**：
-| 文件 | 说明 |
-|------|------|
-| `backend/alice/domain/execution/services/execution_service.py` | 命令拦截逻辑 |
-| `backend/alice/domain/execution/builtin/` | 命令处理器 |
-| `prompts/alice.md` | 命令文档 |
+**耦合点**：
+| 改动 | 必须同步 | 原因 |
+|------|---------|------|
+| 内存文件路径 | `backend/alice/core/config/settings.py` | 配置中的路径常量 |
+| 日期小节格式 | `memory/short_term_memory.md` | `## YYYY-MM-DD` 格式约定 |
 
 ---
 
-### 场景 3：内存文件路径
+### backend/alice/infrastructure/bridge/server.py (312 行)
 
-**触发条件**：修改内存文件位置
+**核心类型**：
+- `BridgeServer [L33]` - 桥接服务器
+  - `start() [L65]` - 启动服务器
+  - `run() [L99]` - 运行主循环
+  - `send_message() [L118]` - 发送消息到前端
+  - `send_status() [L136]` - 发送状态消息
+  - `send_thinking() [L147]` - 发送思考消息
+  - `send_content() [L156]` - 发送正文消息
+  - `send_tokens() [L165]` - 发送 Token 统计
+  - `send_error() [L181]` - 发送错误消息
+  - `_on_message_received() [L193]` - 接收消息回调
+- `create_bridge_server() [L233]` - 工厂函数
+- `main_with_agent() [L253]` - 主入口
 
-**需要同步的文件**：
-| 文件 | 说明 |
-|------|------|
-| `backend/alice/core/config/settings.py` | 路径配置 |
-| `backend/alice/domain/memory/services/memory_manager.py` | 文件引用 |
-
----
-
-### 场景 4：LLM Provider 接口
-
-**触发条件**：修改 LLM 接口
-
-**需要同步的文件**：
-| 文件 | 说明 |
-|------|------|
-| `backend/alice/core/interfaces/llm_provider.py` | 接口定义 |
-| `backend/alice/domain/llm/providers/` | Provider 实现 |
-| `backend/alice/domain/llm/services/` | 服务使用 |
-
----
-
-## L3 数据文件格式
-
-### prompts/alice.md
-- **格式**：Markdown 系统提示词
-- **读取**：`backend/alice/application/agent/agent.py`
-
-### memory/alice_memory.md (LTM)
-- **格式**：
-  ```markdown
-  # Alice 的长期记忆
-  ## 经验教训
-  - [YYYY-MM-DD] 内容
-  ```
-
-### memory/short_term_memory.md (STM)
-- **格式**：
-  ```markdown
-  # Alice 的短期记忆 (最近 7 天)
-  ## YYYY-MM-DD
-  - [HH:MM] 内容
-  ```
-
-### memory/working_memory.md
-- **格式**：
-  ```markdown
-  --- ROUND ---
-  USER: ...
-  ALICE_THINKING: ...
-  ALICE_RESPONSE: ...
-  ```
-
-### skills/*/SKILL.md
-- **格式**：
-  ```yaml
-  ---
-  name: skill-name
-  description: 技能描述
-  ---
-  # Markdown 内容
-  ```
-
-### .env
-- **必需变量**：`API_KEY`, `MODEL_NAME`
-- **可选变量**：`API_BASE_URL`, `WORKING_MEMORY_MAX_ROUNDS`
+**耦合点**：
+| 改动 | 必须同步 | 原因 |
+|------|---------|------|
+| 输出消息格式 | `frontend/src/bridge/protocol/message.rs::BridgeMessage` | **跨语言协议** |
+| INTERRUPT_SIGNAL 常量 | `protocols/shared_types.py` | 中断信号约定 |
 
 ---
 
-## 参考文档
+### backend/alice/infrastructure/bridge/protocol/messages.py (124 行)
 
-- **[ARCHITECTURE.md](ARCHITECTURE.md)** - 详细架构说明
-- **[API.md](API.md)** - API 接口文档
-- **[CLAUDE.md](CLAUDE.md)** - 开发指南
-- **[README.md](README.md)** - 项目说明
+**核心类型**：
+- `MessageType [L15]` - 消息类型枚举（STATUS/THINKING/CONTENT/TOKENS/ERROR/INTERRUPT）
+- `StatusType [L25]` - 状态类型枚举（READY/THINKING/EXECUTING_TOOL/DONE）
+- `StatusMessage [L40]` - 状态消息
+- `ThinkingMessage [L47]` - 思考消息
+- `ContentMessage [L54]` - 正文消息
+- `TokensMessage [L61]` - Token 统计消息
+- `ErrorMessage [L70]` - 错误消息
+- `InterruptMessage [L78]` - 中断消息
+- `BridgeMessage [L84]` - 联合类型（所有消息）
+- `INTERRUPT_SIGNAL [L102]` - 中断信号常量 `"__INTERRUPT__"`
+
+**耦合点**：
+| 改动 | 必须同步 | 原因 |
+|------|---------|------|
+| MessageType/StatusType 值 | `frontend/src/bridge/protocol/message.rs` | **跨语言协议** |
+| INTERRUPT_SIGNAL | `frontend/src/core/dispatcher.rs::send_interrupt()` | 中断信号约定 |
+
+---
+
+### backend/alice/domain/skills/services/skill_registry.py (141 行)
+
+**核心类型**：
+- `SkillRegistry [L17]` - 技能注册表
+  - `refresh() [L32]` - 刷新技能注册表
+  - `get_skill() [L44]` - 获取指定技能
+  - `list_skills() [L57]` - 列出所有技能名称
+  - `get_all_skills() [L67]` - 获取所有技能
+  - `get_skill_info() [L77]` - 获取技能详细信息
+  - `list_skills_summary() [L99]` - 生成技能列表摘要
+
+**耦合点**：
+| 改动 | 必须同步 | 原因 |
+|------|---------|------|
+| SKILL.md 格式 | `skills/*/SKILL.md` | YAML frontmatter 解析 |
+
+---
+
+### protocols/shared_types.py (153 行)
+
+**核心类型**：
+- `MessageType [L13]` - 消息类型枚举
+- `StatusType [L23]` - 状态类型枚举
+- `StatusMessage/ThinkingMessage/...` - 各类消息 dataclass
+- `BridgeMessage [L82]` - 联合类型
+- `INTERRUPT_SIGNAL [L100]` - 中断信号常量
+- `message_from_dict() [L103]` - 从字典解析消息
+- `message_to_dict() [L132]` - 消息转字典
+
+**耦合点**：
+| 改动 | 必须同步 | 原因 |
+|------|---------|------|
+| 全部类型定义 | `backend/alice/infrastructure/bridge/protocol/messages.py` | 类型重复定义 |
+| 全部类型定义 | `frontend/src/bridge/protocol/message.rs` | **跨语言协议** |
+
+---
+
+## L2 跨文件耦合总图
+
+### 场景 A：修改 Bridge 通信协议
+
+**触发条件**：新增/修改/删除 Bridge 消息类型
+
+**需要同步修改的文件**：
+| 文件 | 位置 | 变更内容 |
+|------|------|----------|
+| `frontend/src/bridge/protocol/message.rs` | `BridgeMessage` 枚举 | 添加新变体 |
+| `backend/alice/infrastructure/bridge/protocol/messages.py` | `MessageType` 枚举 | 添加新类型 |
+| `protocols/shared_types.py` | `MessageType/BridgeMessage` | 添加新类型 |
+| `frontend/src/core/dispatcher.rs` | `handle_bridge_message()` | 处理新消息类型 |
+| `backend/alice/infrastructure/bridge/server.py` | 发送方法 | 添加新发送方法 |
+
+**注意**：协议变更属于破坏性变更，需要确保 Rust 和 Python 两侧同时更新。
+
+---
+
+### 场景 B：修改 Agent 状态
+
+**触发条件**：新增/修改 Agent 运行状态
+
+**需要同步修改的文件**：
+| 文件 | 位置 | 变更内容 |
+|------|------|----------|
+| `frontend/src/app/state.rs` | `AgentStatus` 枚举 | 添加新状态 |
+| `frontend/src/core/dispatcher.rs` | `AppState` 枚举 | 添加新状态 |
+| `frontend/src/core/dispatcher.rs` | `convert_state_to_agent_status()` | 更新转换逻辑 |
+| `frontend/src/core/dispatcher.rs` | `convert_agent_status_to_app_state()` | 更新转换逻辑 |
+| `backend/alice/infrastructure/bridge/protocol/messages.py` | `StatusType` 枚举 | 添加新状态值 |
+
+---
+
+### 场景 C：新增内置命令
+
+**触发条件**：添加新的宿主机执行命令（如 `history`）
+
+**需要同步修改的文件**：
+| 文件 | 位置 | 变更内容 |
+|------|------|----------|
+| `backend/alice/domain/execution/services/execution_service.py` | `_builtin_handlers` 字典 | 添加命令映射 |
+| `backend/alice/domain/execution/services/execution_service.py` | `_handle_*()` 方法 | 实现命令处理 |
+| `prompts/alice.md` | 命令说明部分 | 更新可用命令列表 |
+
+---
+
+### 场景 D：修改内存文件格式
+
+**触发条件**：修改 `memory/` 目录下文件的存储格式
+
+**需要同步修改的文件**：
+| 文件 | 位置 | 变更内容 |
+|------|------|----------|
+| `backend/alice/domain/memory/services/memory_manager.py` | 内存读写方法 | 适配新格式 |
+| `backend/alice/domain/memory/stores/*.py` | 文件解析逻辑 | 更新解析器 |
+| `prompts/alice.md` | 内存使用说明 | 更新格式说明 |
+
+**关键格式约定**：
+- STM 日期小节：`## YYYY-MM-DD`
+- 工作内存轮次分隔：`--- ROUND ---`
+
+---
+
+## L3 数据文件格式契约
+
+### `prompts/alice.md`
+
+- **写入方**：`backend/alice/domain/execution/services/execution_service.py::_update_prompt_file()`
+- **读取方**：`backend/alice/application/agent/agent.py`（通过 LLM 上下文注入）
+- **格式**：Markdown 文本，包含 Agent 人设和可用命令说明
+- **关键约定**：内置命令列表必须与 `_builtin_handlers` 中定义的一致
+
+---
+
+### `memory/working_memory.md`
+
+- **写入方**：`backend/alice/domain/memory/stores/working_store.py`
+- **读取方**：`backend/alice/domain/memory/services/memory_manager.py`
+- **格式**：对话轮次列表，每轮用 `--- ROUND ---` 分隔
+- **关键正则**：`r'--- ROUND ---'` 用于轮次分割
+
+---
+
+### `memory/short_term_memory.md`
+
+- **写入方**：`backend/alice/domain/memory/stores/stm_store.py`
+- **读取方**：`backend/alice/domain/memory/services/memory_manager.py`
+- **格式**：日期小节结构 `## YYYY-MM-DD`
+- **关键约定**：超过 7 天的小节会被提炼到 LTM 并删除
+
+---
+
+### `memory/alice_memory.md`
+
+- **写入方**：`backend/alice/domain/memory/stores/ltm_store.py`
+- **读取方**：`backend/alice/domain/memory/services/memory_manager.py`
+- **格式**：Markdown，包含 `## 经验教训` 小节和自动提炼条目
+
+---
+
+### `memory/todo.md`
+
+- **写入方**：`backend/alice/domain/execution/builtin/todo_command.py`
+- **读取方**：内置 `todo` 命令处理
+- **格式**：Markdown 任务列表
+
+---
+
+### `skills/*/SKILL.md`
+
+- **写入方**：手动维护
+- **读取方**：`backend/alice/domain/skills/loaders/directory_loader.py`
+- **格式**：YAML frontmatter + Markdown 内容
+- **关键正则**：
+  - 分隔符：`^---$`
+  - name 字段：`^name:\s*(.+)$`
+  - description 字段：`^description:\s*(.+)$`
+
+---
+
+### `protocols/bridge_schema.json`
+
+- **写入方**：手动维护
+- **读取方**：文档参考
+- **格式**：JSON Schema，描述 Bridge 消息格式
+- **关键约定**：与 Rust/Python 中的消息类型定义保持一致
+
+---
+
+## 附录：LSP 符号提取统计
+
+| 语言 | 源文件数 | 总行数 | 主要 LSP 服务器 |
+|------|---------|--------|----------------|
+| Rust | ~30 | ~3719 | rust-analyzer |
+| Python | ~95 | ~13155 | pyright/pylsp |
+
+---
+
+**同步报告**：
+- CODE_MAP.md 已创建 (commit: 163eaf0)
+- 首次创建，扫描了全部源代码文件
+- LSP 可用性：rust-analyzer 未就绪（回退到文本分析），pyright 部分可用
+- 识别跨语言协议耦合 2 处（BridgeMessage、StatusType）
+- 识别配置耦合 4 处（内置命令、内存路径、技能格式、日期小节）
