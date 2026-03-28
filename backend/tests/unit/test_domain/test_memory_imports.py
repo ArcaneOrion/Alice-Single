@@ -47,7 +47,7 @@ class TestMemoryImports(unittest.TestCase):
 
             def _get_extra_headers(self) -> dict[str, str]:
                 self.extra_headers_calls += 1
-                return {"User-Agent": "curl/8.0.0", "X-Test": "1"}
+                return {"User-Agent": "curl/8.0", "X-Test": "1"}
 
         provider = FakeProvider()
         distiller = Distiller(llm_provider=provider)
@@ -59,7 +59,7 @@ class TestMemoryImports(unittest.TestCase):
         assert provider.completions.last_kwargs is not None
         self.assertEqual(
             provider.completions.last_kwargs["extra_headers"],
-            {"User-Agent": "curl/8.0.0", "X-Test": "1"},
+            {"User-Agent": "curl/8.0", "X-Test": "1"},
         )
 
 

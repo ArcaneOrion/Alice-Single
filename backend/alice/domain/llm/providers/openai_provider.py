@@ -21,7 +21,7 @@ from backend.alice.domain.llm.models.stream_chunk import StreamChunk
 
 logger = logging.getLogger(__name__)
 
-CURL_USER_AGENT = "curl/8.0.0"
+CURL_USER_AGENT = "curl/8.0"
 
 DEFAULT_REQUEST_HEADER_PROFILES: list[dict[str, str]] = [
     {

@@ -122,6 +122,13 @@ class ConfigLoader:
             enable_colors=data.get("enable_colors", True),
             max_size_mb=data.get("max_size_mb", 10),
             backup_count=data.get("backup_count", 3),
+            enable_structured=data.get("enable_structured", True),
+            dual_write_legacy=data.get("dual_write_legacy", True),
+            logs_dir=data.get("logs_dir", ".alice/logs"),
+            system_log_file=data.get("system_log_file", "system.jsonl"),
+            tasks_log_file=data.get("tasks_log_file", "tasks.jsonl"),
+            changes_log_file=data.get("changes_log_file", "changes.jsonl"),
+            schema_file=data.get("schema_file", "schema_version.json"),
         )
 
     def _apply_env_vars(self, settings: Settings) -> None:
@@ -141,6 +148,15 @@ class ConfigLoader:
         # 日志配置
         if log_level := os.getenv("LOG_LEVEL"):
             settings.logging.level = log_level
+        if structured := os.getenv("LOG_ENABLE_STRUCTURED"):
+            settings.logging.enable_structured = structured.lower() in {"1", "true", "yes", "on"}
+        if dual_write := os.getenv("LOG_DUAL_WRITE_LEGACY"):
+            settings.logging.dual_write_legacy = dual_write.lower() in {"1", "true", "yes", "on"}
+        if logs_dir := os.getenv("LOGS_DIR"):
+            settings.logging.logs_dir = logs_dir
+        if legacy_mode := os.getenv("USE_LEGACY_LOGGING"):
+            use_legacy = legacy_mode.lower() in {"1", "true", "yes", "on"}
+            settings.logging.enable_structured = not use_legacy
 
     @staticmethod
     def expand_env_vars(value: str) -> str:

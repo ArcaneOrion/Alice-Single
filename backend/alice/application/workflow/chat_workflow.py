@@ -6,6 +6,8 @@
 
 import logging
 import re
+import time
+import traceback
 from typing import Iterator, Optional
 
 from .base_workflow import Workflow, WorkflowContext
@@ -19,14 +21,29 @@ from ..dto import (
     DoneResponse,
     ErrorResponse,
     TokensResponse,
-    ResponseType,
     StatusType,
 )
-from backend.alice.domain.llm.parsers.stream_parser import StreamParser, StreamParserConfig
-from backend.alice.domain.llm.models.stream_chunk import StreamChunk
+from backend.alice.domain.llm.parsers.stream_parser import StreamParser
 
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_workflow_logging_context(context: WorkflowContext) -> dict:
+    """提取工作流日志上下文（兼容缺省字段）"""
+    request_context = context.request_context
+    metadata = request_context.metadata if isinstance(request_context.metadata, dict) else {}
+    session_id = metadata.get("session_id") or ""
+    request_id = metadata.get("request_id") or metadata.get("trace_id") or ""
+    task_id = metadata.get("task_id") or request_id or session_id or ""
+
+    return {
+        "task_id": task_id,
+        "request_id": request_id,
+        "session_id": session_id,
+        "request_type": request_context.request_type.value,
+        "workflow": "chat_workflow",
+    }
 
 
 class ChatWorkflow(Workflow):
@@ -86,12 +103,39 @@ class ChatWorkflow(Workflow):
         iteration = 0
         full_content = ""
         full_thinking = ""
+        log_context = _extract_workflow_logging_context(context)
 
         while iteration < self.max_iterations:
             iteration += 1
+            iteration_started_at = time.monotonic()
+
+            logger.info(
+                "Chat workflow iteration started",
+                extra={
+                    "event_type": "iteration_start",
+                    "log_category": "tasks",
+                    "context": log_context,
+                    "data": {
+                        "iteration": iteration,
+                        "max_iterations": self.max_iterations,
+                    },
+                },
+            )
 
             if context.interrupted:
-                logger.info("聊天工作流被中断")
+                logger.info(
+                    "Chat workflow interrupted",
+                    extra={
+                        "event_type": "iteration_end",
+                        "log_category": "tasks",
+                        "context": log_context,
+                        "data": {
+                            "iteration": iteration,
+                            "end_reason": "interrupted",
+                            "duration_ms": int((time.monotonic() - iteration_started_at) * 1000),
+                        },
+                    },
+                )
                 yield DoneResponse()
                 break
 
@@ -105,7 +149,26 @@ class ChatWorkflow(Workflow):
                     yield ErrorResponse(content="Chat service not available", code="NO_SERVICE")
                     break
             except Exception as e:
-                logger.error(f"聊天请求失败: {e}")
+                error_trace = traceback.format_exc()
+                logger.error(
+                    "Chat request failed",
+                    exc_info=True,
+                    extra={
+                        "event_type": "iteration_end",
+                        "log_category": "tasks",
+                        "context": log_context,
+                        "data": {
+                            "iteration": iteration,
+                            "end_reason": "chat_error",
+                            "duration_ms": int((time.monotonic() - iteration_started_at) * 1000),
+                        },
+                        "error": {
+                            "type": type(e).__name__,
+                            "message": str(e),
+                            "traceback": error_trace,
+                        },
+                    },
+                )
                 yield ErrorResponse(content=f"Chat request failed: {str(e)}", code="CHAT_ERROR")
                 break
 
@@ -149,16 +212,58 @@ class ChatWorkflow(Workflow):
                     yield ContentResponse(content=msg.content)
 
             if context.interrupted:
+                logger.info(
+                    "Chat workflow interrupted during stream",
+                    extra={
+                        "event_type": "iteration_end",
+                        "log_category": "tasks",
+                        "context": log_context,
+                        "data": {
+                            "iteration": iteration,
+                            "end_reason": "interrupted_during_stream",
+                            "duration_ms": int((time.monotonic() - iteration_started_at) * 1000),
+                        },
+                    },
+                )
                 yield DoneResponse()
                 break
 
             # 检查工具调用
             tool_calls = self._extract_tool_calls(full_content)
+            tool_types = sorted({tool_type for tool_type, _ in tool_calls})
+
+            logger.info(
+                "Tool detection completed",
+                extra={
+                    "event_type": "tool_detection",
+                    "log_category": "tasks",
+                    "context": log_context,
+                    "data": {
+                        "iteration": iteration,
+                        "tool_call_count": len(tool_calls),
+                        "tool_types": tool_types,
+                    },
+                },
+            )
 
             if not tool_calls:
                 # 无工具调用，结束
                 if self.chat_service:
                     self.chat_service.add_assistant_message(full_content)
+                logger.info(
+                    "Chat workflow iteration completed",
+                    extra={
+                        "event_type": "iteration_end",
+                        "log_category": "tasks",
+                        "context": log_context,
+                        "data": {
+                            "iteration": iteration,
+                            "end_reason": "completed_without_tool",
+                            "tool_call_count": 0,
+                            "duration_ms": int((time.monotonic() - iteration_started_at) * 1000),
+                        },
+                    },
+                )
                 yield DoneResponse()
                 break
 
@@ -187,6 +292,19 @@ class ChatWorkflow(Workflow):
                     results.append(f"{tool_type.capitalize()} 执行失败: {str(e)}")
 
             if context.interrupted:
+                logger.info(
+                    "Chat workflow interrupted during tool execution",
+                    extra={
+                        "event_type": "iteration_end",
+                        "log_category": "tasks",
+                        "context": log_context,
+                        "data": {
+                            "iteration": iteration,
+                            "end_reason": "interrupted_during_tool_execution",
+                            "duration_ms": int((time.monotonic() - iteration_started_at) * 1000),
+                        },
+                    },
+                )
                 yield DoneResponse()
                 break
 
@@ -199,9 +317,36 @@ class ChatWorkflow(Workflow):
             full_content = ""
             full_thinking = ""
 
+            logger.info(
+                "Chat workflow iteration completed",
+                extra={
+                    "event_type": "iteration_end",
+                    "log_category": "tasks",
+                    "context": log_context,
+                    "data": {
+                        "iteration": iteration,
+                        "end_reason": "tools_executed",
+                        "tool_call_count": len(tool_calls),
+                        "tool_result_count": len(results),
+                        "duration_ms": int((time.monotonic() - iteration_started_at) * 1000),
+                    },
+                },
+            )
+
         # 更新工作内存
         if iteration >= self.max_iterations:
-            logger.warning(f"达到最大迭代次数 ({self.max_iterations})")
+            logger.warning(
+                "Reached max chat workflow iterations",
+                extra={
+                    "event_type": "max_iterations_warning",
+                    "log_category": "tasks",
+                    "context": log_context,
+                    "data": {
+                        "iteration": iteration,
+                        "max_iterations": self.max_iterations,
+                    },
+                },
+            )
             yield ErrorResponse(
                 content="达到最大迭代次数，可能存在无限循环",
                 code="MAX_ITERATIONS",

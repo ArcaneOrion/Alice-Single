@@ -5,25 +5,39 @@ Alice Agent - 应用层主协调器
 """
 
 import logging
-import os
-from pathlib import Path
+import time
+import traceback
 from typing import Iterator, Optional
+from uuid import uuid4
 
 from ..dto import (
     ApplicationResponse,
     RequestContext,
     WorkflowContext,
-    StatusResponse,
-    DoneResponse,
     ErrorResponse,
     AgentStatus,
     StatusType,
 )
-from ..workflow import WorkflowChain, ChatWorkflow
+from ..workflow import WorkflowChain
 from ..services import OrchestrationService, LifecycleService
 
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_request_logging_context(request: RequestContext) -> dict:
+    """提取请求日志上下文（兼容缺省字段）"""
+    metadata = request.metadata if isinstance(request.metadata, dict) else {}
+    session_id = metadata.get("session_id") or ""
+    request_id = metadata.get("request_id") or metadata.get("trace_id") or ""
+    task_id = metadata.get("task_id") or request_id or session_id or ""
+
+    return {
+        "task_id": task_id,
+        "request_id": request_id,
+        "session_id": session_id,
+        "request_type": request.request_type.value,
+    }
 
 
 class AliceAgent:
@@ -90,6 +104,27 @@ class AliceAgent:
         """
         self._interrupted = False
         self._request_count += 1
+        started_at = time.monotonic()
+        request.metadata = dict(request.metadata)
+        request.metadata.setdefault("request_id", uuid4().hex)
+        request.metadata.setdefault(
+            "task_id",
+            request.metadata.get("session_id") or request.metadata["request_id"],
+        )
+        log_context = _extract_request_logging_context(request)
+
+        logger.info(
+            "Agent task started",
+            extra={
+                "event_type": "task_start",
+                "log_category": "tasks",
+                "context": log_context,
+                "data": {
+                    "request_count": self._request_count,
+                    "user_input_length": len(request.user_input),
+                },
+            },
+        )
 
         # 更新状态
         self._status.state = StatusType.THINKING
@@ -110,14 +145,58 @@ class AliceAgent:
             # 执行工作流链
             if self.workflow_chain:
                 yield from self.workflow_chain.process(workflow_context)
+                logger.info(
+                    "Agent task completed",
+                    extra={
+                        "event_type": "task_complete",
+                        "log_category": "tasks",
+                        "context": log_context,
+                        "data": {
+                            "duration_ms": int((time.monotonic() - started_at) * 1000),
+                            "interrupted": self._interrupted,
+                        },
+                    },
+                )
             else:
+                logger.error(
+                    "No workflow chain configured",
+                    extra={
+                        "event_type": "task_error",
+                        "log_category": "tasks",
+                        "context": log_context,
+                        "data": {
+                            "error_code": "NO_WORKFLOW_CHAIN",
+                        },
+                        "error": {
+                            "type": "NO_WORKFLOW_CHAIN",
+                            "message": "No workflow chain configured",
+                        },
+                    },
+                )
                 yield ErrorResponse(
                     content="No workflow chain configured",
                     code="NO_WORKFLOW_CHAIN",
                 )
 
         except Exception as e:
-            logger.error(f"处理请求时发生错误: {e}", exc_info=True)
+            error_trace = traceback.format_exc()
+            logger.error(
+                "Request processing failed",
+                exc_info=True,
+                extra={
+                    "event_type": "task_error",
+                    "log_category": "tasks",
+                    "context": log_context,
+                    "data": {
+                        "duration_ms": int((time.monotonic() - started_at) * 1000),
+                    },
+                    "error": {
+                        "type": type(e).__name__,
+                        "message": str(e),
+                        "traceback": error_trace,
+                    },
+                },
+            )
             yield ErrorResponse(
                 content=f"Request processing failed: {str(e)}",
                 code="PROCESSING_ERROR",
@@ -146,7 +225,22 @@ class AliceAgent:
 
     def interrupt(self) -> None:
         """中断当前执行"""
-        logger.info("收到中断信号")
+        logger.info(
+            "Agent interrupt received",
+            extra={
+                "event_type": "interrupt_received",
+                "log_category": "tasks",
+                "context": {
+                    "task_id": "",
+                    "request_id": "",
+                    "session_id": "",
+                    "request_type": "",
+                },
+                "data": {
+                    "status": self._status.state.value,
+                },
+            },
+        )
         self._interrupted = True
 
         # 传播中断到工作流
