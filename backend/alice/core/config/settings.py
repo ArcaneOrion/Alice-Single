@@ -55,6 +55,13 @@ class LoggingConfig:
     enable_colors: bool = True
     max_size_mb: int = 10
     backup_count: int = 3
+    enable_structured: bool = True
+    dual_write_legacy: bool = True
+    logs_dir: str = ".alice/logs"
+    system_log_file: str = "system.jsonl"
+    tasks_log_file: str = "tasks.jsonl"
+    changes_log_file: str = "changes.jsonl"
+    schema_file: str = "schema_version.json"
 
 
 @dataclass

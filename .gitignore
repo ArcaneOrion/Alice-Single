@@ -1,4 +1,5 @@
 .env
+.alice/
 __pycache__/
 *.py[cod]
 alice_output/

@@ -8,7 +8,7 @@ Bridge Server
 import logging
 import os
 import traceback
-from typing import TYPE_CHECKING, Callable, Optional, Type
+from typing import TYPE_CHECKING, Optional, Type
 
 from .protocol import (
     StatusType,
@@ -24,6 +24,32 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+def _bridge_log_extra(
+    event_type: str,
+    *,
+    data: Optional[dict] = None,
+    context: Optional[dict] = None,
+    error: Optional[dict] = None,
+) -> dict:
+    """构造 bridge 结构化日志字段"""
+    merged_context = {
+        "component": "bridge_server",
+        "task_id": "",
+        "request_id": "",
+        "session_id": "",
+        **(context or {}),
+    }
+    payload = {
+        "event_type": event_type,
+        "log_category": "bridge.server",
+        "context": merged_context,
+        "data": data or {},
+    }
+    if error is not None:
+        payload["error"] = error
+    return payload
 
 
 # 默认的 StreamManager 类（允许外部注入替代实现）
@@ -69,10 +95,22 @@ class BridgeServer:
         初始化传输层并发送就绪信号。
         """
         if self._running:
-            logger.warning("BridgeServer already running")
+            logger.warning(
+                "BridgeServer already running",
+                extra=_bridge_log_extra(
+                    "bridge_already_running",
+                    data={"reason": "already_running"},
+                ),
+            )
             return
 
-        logger.info("TUI Bridge 进程启动。")
+        logger.info(
+            "Bridge server starting",
+            extra=_bridge_log_extra(
+                "bridge_start",
+                data={"transport": type(self.transport).__name__},
+            ),
+        )
 
         # 设置传输层回调
         self.transport.set_message_callback(self._on_message_received)
@@ -85,7 +123,10 @@ class BridgeServer:
 
         # 发送就绪信号
         self.send_status(StatusType.READY)
-        logger.info("BridgeServer 就绪")
+        logger.info(
+            "Bridge server ready",
+            extra=_bridge_log_extra("bridge_ready"),
+        )
 
     def stop(self) -> None:
         """停止桥接服务器。"""
@@ -94,7 +135,10 @@ class BridgeServer:
 
         self._running = False
         self.transport.stop()
-        logger.info("BridgeServer 已停止")
+        logger.info(
+            "Bridge server stopped",
+            extra=_bridge_log_extra("bridge_stop"),
+        )
 
     def run(self) -> None:
         """
@@ -109,7 +153,10 @@ class BridgeServer:
                 import time
                 time.sleep(0.1)
         except KeyboardInterrupt:
-            logger.info("收到键盘中断，正在关闭...")
+            logger.info(
+                "Bridge server interrupted by keyboard",
+                extra=_bridge_log_extra("bridge_interrupt"),
+            )
         finally:
             self.stop()
 
@@ -200,21 +247,52 @@ class BridgeServer:
         try:
             # 检查是否为中断信号
             if message == INTERRUPT_SIGNAL:
+                logger.info(
+                    "Bridge interrupt signal received",
+                    extra=_bridge_log_extra("bridge_interrupt"),
+                )
                 self.interrupt_handler.check_interrupt()
                 return
 
             # 处理用户输入
             if self.agent is not None:
+                logger.info(
+                    "Bridge message received",
+                    extra=_bridge_log_extra(
+                        "bridge_message_received",
+                        data={"message_length": len(message)},
+                    ),
+                )
                 self.message_handler.handle_input(message)
 
         except Exception as e:
             error_trace = traceback.format_exc()
-            logger.error(f"处理消息时出错:\n{error_trace}")
+            logger.error(
+                "Bridge message handling failed",
+                exc_info=True,
+                extra=_bridge_log_extra(
+                    "bridge_message_error",
+                    context={
+                        "message_preview": message[:120],
+                    },
+                    data={
+                        "message_length": len(message),
+                    },
+                    error={
+                        "type": type(e).__name__,
+                        "message": str(e),
+                        "traceback": error_trace,
+                    },
+                ),
+            )
             self.send_error(f"Error: {str(e)}")
 
     def _on_eof_received(self) -> None:
         """接收到 EOF 时的回调。"""
-        logger.info("接收到 EOF，退出主循环。")
+        logger.info(
+            "Bridge EOF received",
+            extra=_bridge_log_extra("bridge_eof"),
+        )
         self._running = False
 
     # ========== 状态查询 ==========
@@ -280,7 +358,18 @@ def main_with_agent(agent_class=None, **agent_kwargs) -> None:
         agent = agent_class(**agent_kwargs)
     except Exception as e:
         error_msg = f"初始化失败: {traceback.format_exc()}"
-        logger.error(error_msg)
+        logger.error(
+            "Bridge agent initialization failed",
+            extra=_bridge_log_extra(
+                "bridge_runtime_error",
+                data={"phase": "initialization"},
+                error={
+                    "type": type(e).__name__,
+                    "message": str(e),
+                    "traceback": error_msg,
+                },
+            ),
+        )
         print(json.dumps({
             "type": "error",
             "content": f"Initialization failed: {str(e)}"
@@ -293,13 +382,27 @@ def main_with_agent(agent_class=None, **agent_kwargs) -> None:
     try:
         server.run()
     except EOFError:
-        logger.info("接收到 EOFError。")
+        logger.info(
+            "Bridge EOFError received",
+            extra=_bridge_log_extra("bridge_eof"),
+        )
     except Exception as e:
         error_trace = traceback.format_exc()
-        logger.error(f"TUI Bridge 运行时异常:\n{error_trace}")
+        logger.error(
+            "Bridge runtime error",
+            extra=_bridge_log_extra(
+                "bridge_runtime_error",
+                data={"phase": "run"},
+                error={
+                    "type": type(e).__name__,
+                    "message": str(e),
+                    "traceback": error_trace,
+                },
+            ),
+        )
         print(json.dumps({
             "type": "error",
-            "content": f"Runtime Error: {str(e)}. 请查看 alice_runtime.log"
+            "content": f"Runtime Error: {str(e)}. 请查看日志输出。"
         }), flush=True)
 
 

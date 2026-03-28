@@ -8,14 +8,22 @@ import logging
 import os
 import subprocess
 import time
-from typing import Optional
+import traceback
 
 from .base import BaseExecutor
 from ..models.command import Command, ExecutionEnvironment
 from ..models.execution_result import ExecutionResult, ExecutionStatus
-from ..models.security_rule import SecurityRule, DEFAULT_SECURITY_RULES
+from ..models.security_rule import DEFAULT_SECURITY_RULES
 
 logger = logging.getLogger(__name__)
+
+
+def _command_preview(command: str, limit: int = 160) -> str:
+    """生成安全的命令预览（单行、限长）"""
+    normalized = " ".join(command.split())
+    if len(normalized) <= limit:
+        return normalized
+    return f"{normalized[:limit]}..."
 
 
 class DockerExecutor(BaseExecutor):
@@ -56,6 +64,7 @@ class DockerExecutor(BaseExecutor):
             ExecutionResult: 执行结果
         """
         start_time = time.time()
+        preview = _command_preview(command.raw)
 
         try:
             if not self._docker_environment_ready:
@@ -63,7 +72,26 @@ class DockerExecutor(BaseExecutor):
 
             full_command = self._build_docker_command(command)
 
-            logger.info(f"执行指令 ({'Python' if command.type.value == 'python' else 'Bash'}): {command.raw[:200]}...")
+            logger.info(
+                "Tool call started",
+                extra={
+                    "event_type": "tool_call",
+                    "log_category": "tasks",
+                    "context": {
+                        "task_id": "",
+                        "request_id": "",
+                        "session_id": "",
+                        "executor": "docker_executor",
+                    },
+                    "data": {
+                        "tool_type": command.type.value,
+                        "command_preview": preview,
+                        "command_length": len(command.raw),
+                        "container_name": self.container_name,
+                        "timeout_seconds": self.default_timeout,
+                    },
+                },
+            )
 
             result = subprocess.run(
                 full_command,
@@ -75,21 +103,93 @@ class DockerExecutor(BaseExecutor):
             )
 
             execution_time = time.time() - start_time
-
-            return ExecutionResult.from_subprocess(
+            execution_result = ExecutionResult.from_subprocess(
                 stdout=result.stdout,
                 stderr=result.stderr,
                 returncode=result.returncode,
                 execution_time=execution_time
             )
 
+            logger.info(
+                "Tool call completed",
+                extra={
+                    "event_type": "tool_result",
+                    "log_category": "tasks",
+                    "context": {
+                        "task_id": "",
+                        "request_id": "",
+                        "session_id": "",
+                        "executor": "docker_executor",
+                    },
+                    "data": {
+                        "tool_type": command.type.value,
+                        "command_preview": preview,
+                        "status": execution_result.status.value,
+                        "success": execution_result.success,
+                        "exit_code": execution_result.exit_code,
+                        "execution_time_ms": int(execution_time * 1000),
+                        "output_length": len(execution_result.output or ""),
+                        "error_length": len(execution_result.error or ""),
+                    },
+                },
+            )
+
+            return execution_result
+
         except subprocess.TimeoutExpired:
-            logger.error(f"命令执行超时: {command.raw[:100]}")
+            logger.error(
+                "Tool call timed out",
+                extra={
+                    "event_type": "tool_timeout",
+                    "log_category": "tasks",
+                    "context": {
+                        "task_id": "",
+                        "request_id": "",
+                        "session_id": "",
+                        "executor": "docker_executor",
+                    },
+                    "data": {
+                        "tool_type": command.type.value,
+                        "command_preview": preview,
+                        "timeout_seconds": self.default_timeout,
+                    },
+                    "error": {
+                        "type": "TimeoutExpired",
+                        "message": (
+                            f"Command execution timeout after {self.default_timeout} seconds"
+                        ),
+                    },
+                },
+            )
             return ExecutionResult.timeout_result(self.default_timeout)
 
         except Exception as e:
             execution_time = time.time() - start_time
-            logger.error(f"命令执行异常: {e}")
+            error_trace = traceback.format_exc()
+            logger.error(
+                "Tool call failed",
+                exc_info=True,
+                extra={
+                    "event_type": "tool_error",
+                    "log_category": "tasks",
+                    "context": {
+                        "task_id": "",
+                        "request_id": "",
+                        "session_id": "",
+                        "executor": "docker_executor",
+                    },
+                    "data": {
+                        "tool_type": command.type.value,
+                        "command_preview": preview,
+                        "execution_time_ms": int(execution_time * 1000),
+                    },
+                    "error": {
+                        "type": type(e).__name__,
+                        "message": str(e),
+                        "traceback": error_trace,
+                    },
+                },
+            )
             return ExecutionResult(
                 success=False,
                 output=f"执行过程中出错: {str(e)}",

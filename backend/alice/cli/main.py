@@ -30,18 +30,11 @@ from backend.alice.application.agent import AliceAgent
 from backend.alice.application.services import OrchestrationService, LifecycleService
 from backend.alice.application.workflow import WorkflowChain, ChatWorkflow
 from backend.alice.application.dto import RequestContext, ChatRequest, response_to_dict
+from backend.alice.core.config.loader import load_config
+from backend.alice.core.logging import configure_logging
 from backend.alice.domain.llm.providers.openai_provider import resolve_request_header_profiles
 from backend.alice.infrastructure.bridge.protocol.messages import INTERRUPT_SIGNAL
 
-
-# 配置日志
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[
-        logging.FileHandler("alice_runtime.log", mode="a", encoding="utf-8")
-    ]
-)
 logger = logging.getLogger("AliceCLI")
 
 
@@ -105,6 +98,8 @@ class TUIBridge:
             from dotenv import load_dotenv
 
             load_dotenv()
+            settings = load_config()
+            configure_logging(settings.logging)
 
             api_key = os.getenv("API_KEY", "")
             base_url = os.getenv("API_BASE_URL", "https://api-inference.modelscope.cn/v1/")
@@ -202,7 +197,7 @@ class TUIBridge:
             except Exception as e:
                 error_trace = traceback.format_exc()
                 logger.error(f"TUI Bridge 运行时异常:\n{error_trace}")
-                self._send_error(f"Runtime Error: {str(e)}. 请查看 alice_runtime.log")
+                self._send_error(f"Runtime Error: {str(e)}. 请查看日志输出。")
                 break
 
         # 清理
