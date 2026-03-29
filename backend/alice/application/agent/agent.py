@@ -25,17 +25,43 @@ from ..services import OrchestrationService, LifecycleService
 logger = logging.getLogger(__name__)
 
 
-def _extract_request_logging_context(request: RequestContext) -> dict:
+def _ensure_request_correlation_ids(request: RequestContext) -> dict:
+    """确保请求携带完整链路标识并回写 metadata。"""
+    metadata = request.metadata if isinstance(request.metadata, dict) else {}
+    metadata = dict(metadata)
+
+    session_id = metadata.get("session_id") or ""
+    trace_id = metadata.get("trace_id") or metadata.get("request_id") or uuid4().hex
+    request_id = metadata.get("request_id") or trace_id
+    task_id = metadata.get("task_id") or request_id or session_id or trace_id
+    span_id = metadata.get("span_id") or f"agent.{uuid4().hex[:12]}"
+
+    metadata["session_id"] = session_id
+    metadata["trace_id"] = trace_id
+    metadata["request_id"] = request_id
+    metadata["task_id"] = task_id
+    metadata["span_id"] = span_id
+    request.metadata = metadata
+    return metadata
+
+
+def _extract_request_logging_context(request: RequestContext, phase: str) -> dict:
     """提取请求日志上下文（兼容缺省字段）"""
     metadata = request.metadata if isinstance(request.metadata, dict) else {}
-    session_id = metadata.get("session_id") or ""
-    request_id = metadata.get("request_id") or metadata.get("trace_id") or ""
-    task_id = metadata.get("task_id") or request_id or session_id or ""
+    session_id = str(metadata.get("session_id") or "")
+    trace_id = str(metadata.get("trace_id") or metadata.get("request_id") or "")
+    request_id = str(metadata.get("request_id") or trace_id)
+    task_id = str(metadata.get("task_id") or request_id or session_id)
+    span_id = str(metadata.get("span_id") or "")
 
     return {
+        "trace_id": trace_id,
         "task_id": task_id,
         "request_id": request_id,
         "session_id": session_id,
+        "span_id": span_id,
+        "component": "agent",
+        "phase": phase,
         "request_type": request.request_type.value,
     }
 
@@ -71,6 +97,7 @@ class AliceAgent:
         self._status = AgentStatus(state=StatusType.READY)
         self._interrupted = False
         self._request_count = 0
+        self._active_log_context: dict | None = None
 
         # 初始化生命周期
         if self.lifecycle:
@@ -105,23 +132,22 @@ class AliceAgent:
         self._interrupted = False
         self._request_count += 1
         started_at = time.monotonic()
-        request.metadata = dict(request.metadata)
-        request.metadata.setdefault("request_id", uuid4().hex)
-        request.metadata.setdefault(
-            "task_id",
-            request.metadata.get("session_id") or request.metadata["request_id"],
-        )
-        log_context = _extract_request_logging_context(request)
+        _ensure_request_correlation_ids(request)
+        log_context = _extract_request_logging_context(request, phase="request_received")
+        self._active_log_context = dict(log_context)
 
         logger.info(
             "Agent task started",
             extra={
-                "event_type": "task_start",
+                "event_type": "task.started",
                 "log_category": "tasks",
                 "context": log_context,
+                "task_id": log_context["task_id"],
                 "data": {
                     "request_count": self._request_count,
                     "user_input_length": len(request.user_input),
+                    "legacy_event_type": "task_start",
+                    "timing": {"duration_ms": 0},
                 },
             },
         )
@@ -145,27 +171,61 @@ class AliceAgent:
             # 执行工作流链
             if self.workflow_chain:
                 yield from self.workflow_chain.process(workflow_context)
-                logger.info(
-                    "Agent task completed",
-                    extra={
-                        "event_type": "task_complete",
-                        "log_category": "tasks",
-                        "context": log_context,
-                        "data": {
-                            "duration_ms": int((time.monotonic() - started_at) * 1000),
-                            "interrupted": self._interrupted,
+                duration_ms = int((time.monotonic() - started_at) * 1000)
+                if self._interrupted:
+                    logger.warning(
+                        "Agent task interrupted",
+                        extra={
+                            "event_type": "task.failed",
+                            "log_category": "tasks",
+                            "context": _extract_request_logging_context(
+                                request, phase="interrupted"
+                            ),
+                            "task_id": log_context["task_id"],
+                            "data": {
+                                "interrupted": True,
+                                "legacy_event_type": "interrupt_received",
+                                "timing": {"duration_ms": duration_ms},
+                            },
+                            "error": {
+                                "type": "INTERRUPTED",
+                                "message": "Task interrupted by user",
+                            },
                         },
-                    },
-                )
+                    )
+                else:
+                    logger.info(
+                        "Agent task completed",
+                        extra={
+                            "event_type": "task.completed",
+                            "log_category": "tasks",
+                            "context": _extract_request_logging_context(
+                                request, phase="completed"
+                            ),
+                            "task_id": log_context["task_id"],
+                            "data": {
+                                "interrupted": False,
+                                "legacy_event_type": "task_complete",
+                                "timing": {"duration_ms": duration_ms},
+                            },
+                        },
+                    )
             else:
                 logger.error(
                     "No workflow chain configured",
                     extra={
-                        "event_type": "task_error",
+                        "event_type": "task.failed",
                         "log_category": "tasks",
-                        "context": log_context,
+                        "context": _extract_request_logging_context(
+                            request, phase="failed"
+                        ),
+                        "task_id": log_context["task_id"],
                         "data": {
                             "error_code": "NO_WORKFLOW_CHAIN",
+                            "legacy_event_type": "task_error",
+                            "timing": {
+                                "duration_ms": int((time.monotonic() - started_at) * 1000)
+                            },
                         },
                         "error": {
                             "type": "NO_WORKFLOW_CHAIN",
@@ -184,11 +244,13 @@ class AliceAgent:
                 "Request processing failed",
                 exc_info=True,
                 extra={
-                    "event_type": "task_error",
+                    "event_type": "task.failed",
                     "log_category": "tasks",
-                    "context": log_context,
+                    "context": _extract_request_logging_context(request, phase="failed"),
+                    "task_id": log_context["task_id"],
                     "data": {
-                        "duration_ms": int((time.monotonic() - started_at) * 1000),
+                        "legacy_event_type": "task_error",
+                        "timing": {"duration_ms": int((time.monotonic() - started_at) * 1000)},
                     },
                     "error": {
                         "type": type(e).__name__,
@@ -205,6 +267,7 @@ class AliceAgent:
         finally:
             # 恢复状态
             self._status.state = StatusType.READY
+            self._active_log_context = None
 
     def chat(self, user_input: str, **kwargs) -> Iterator[ApplicationResponse]:
         """处理聊天请求
@@ -225,19 +288,30 @@ class AliceAgent:
 
     def interrupt(self) -> None:
         """中断当前执行"""
+        active_context = dict(self._active_log_context or {})
+        active_context.setdefault("trace_id", "")
+        active_context.setdefault("request_id", "")
+        active_context.setdefault("task_id", "")
+        active_context.setdefault("session_id", "")
+        active_context["span_id"] = (
+            f"{active_context.get('span_id')}.interrupt"
+            if active_context.get("span_id")
+            else f"agent.interrupt.{uuid4().hex[:8]}"
+        )
+        active_context["component"] = "agent"
+        active_context["phase"] = "interrupt_requested"
+
         logger.info(
             "Agent interrupt received",
             extra={
-                "event_type": "interrupt_received",
+                "event_type": "workflow.state_transition",
                 "log_category": "tasks",
-                "context": {
-                    "task_id": "",
-                    "request_id": "",
-                    "session_id": "",
-                    "request_type": "",
-                },
+                "context": active_context,
+                "task_id": active_context["task_id"],
                 "data": {
                     "status": self._status.state.value,
+                    "legacy_event_type": "interrupt_received",
+                    "timing": {"duration_ms": 0},
                 },
             },
         )
