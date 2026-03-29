@@ -99,7 +99,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let tick_rate = Duration::from_millis(100);
     let mut last_tick = Instant::now();
-    let mut exit_reason = "unknown";
+    let exit_reason: &str;
 
     // 主事件循环
     loop {
