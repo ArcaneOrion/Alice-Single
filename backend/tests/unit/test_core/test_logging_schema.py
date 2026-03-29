@@ -7,6 +7,10 @@ Logging schema 单元测试
 import json
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from backend.alice.core.config.settings import LoggingConfig
+from backend.alice.core.logging.configure import _ensure_schema_file
 
 
 class TestLoggingSchema(unittest.TestCase):
@@ -69,6 +73,7 @@ class TestLoggingSchema(unittest.TestCase):
             "system.health_check",
             "system.config_reload",
             "system.alert",
+            "model.stream_started",
             "task.created",
             "task.started",
             "task.progress",
@@ -123,6 +128,33 @@ class TestLoggingSchema(unittest.TestCase):
 
         self.assertTrue(has_context, "At least one example record should include context")
         self.assertTrue(has_data, "At least one example record should include data")
+
+    def test_existing_legacy_schema_is_refreshed_when_shape_expands(self) -> None:
+        """已有旧版 schema 文件时，也应自动升级到当前完整结构。"""
+        with TemporaryDirectory() as temp_dir:
+            logs_dir = Path(temp_dir)
+            schema_path = logs_dir / "schema_version.json"
+            schema_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": "1.0.0",
+                        "generated_at": "2026-03-28T00:00:00Z",
+                        "required_fields": ["ts", "event_type", "level", "source"],
+                        "log_files": [],
+                        "recommended_fields": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            config = LoggingConfig(logs_dir=str(logs_dir))
+            _ensure_schema_file(config, logs_dir)
+
+            upgraded_schema = json.loads(schema_path.read_text(encoding="utf-8"))
+            self.assertEqual(upgraded_schema["schema_version"], "2.0.0")
+            self.assertIn("event_types", upgraded_schema)
+            self.assertIn("field_definitions", upgraded_schema)
+            self.assertIn("example_records", upgraded_schema)
 
 
 if __name__ == "__main__":

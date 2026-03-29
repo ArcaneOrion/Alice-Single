@@ -44,6 +44,7 @@ TASK_EVENT_ROOTS = frozenset(
 CHANGE_EVENT_ROOTS = frozenset({"change", "memory", "skill", "config"})
 TASK_CATEGORY_ROOTS = frozenset({"tasks", *TASK_EVENT_ROOTS})
 CHANGE_CATEGORY_ROOTS = frozenset({"changes", *CHANGE_EVENT_ROOTS})
+SCHEMA_VERSION = "2.0.0"
 
 
 class StructuredCategoryRouterFilter(logging.Filter):
@@ -171,52 +172,209 @@ def _build_legacy_file_handler(
 
 def _ensure_schema_file(config: LoggingConfig, logs_dir: Path) -> None:
     schema_path = logs_dir / config.schema_file
+    payload = _build_schema_payload(config)
     if schema_path.exists():
-        return
+        try:
+            existing_payload = json.loads(schema_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            existing_payload = None
+        else:
+            if not _schema_requires_refresh(existing_payload, payload):
+                return
 
-    payload = {
-        "schema_version": "2.0.0",
+    schema_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _build_schema_payload(config: LoggingConfig) -> dict[str, object]:
+    system_event_types = [
+        "system.start",
+        "system.shutdown",
+        "system.health_check",
+        "system.config_reload",
+        "system.alert",
+    ]
+    task_event_types = [
+        "task.created",
+        "task.started",
+        "task.progress",
+        "task.completed",
+        "task.failed",
+        "api.request",
+        "api.response",
+        "api.retry",
+        "api.error",
+        "model.prompt_built",
+        "model.stream_started",
+        "model.stream_chunk",
+        "model.stream_completed",
+        "model.tool_decision",
+        "bridge.message_sent",
+        "bridge.message_received",
+        "workflow.state_transition",
+        "executor.command_prepared",
+        "executor.command_result",
+    ]
+    change_event_types = [
+        "change.file_saved",
+        "change.memory_updated",
+        "change.skill_loaded",
+        "change.config_mutation",
+        "change.execution_plan",
+    ]
+    return {
+        "schema_version": SCHEMA_VERSION,
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "required_fields": ["ts", "event_type", "level", "source"],
         "log_files": [
             {
                 "file": config.system_log_file,
-                "event_types": ["system.start", "system.shutdown", "system.health_check", "system.config_reload", "system.alert"],
+                "event_types": system_event_types,
             },
             {
                 "file": config.tasks_log_file,
-                "event_types": [
-                    "task.created",
-                    "task.started",
-                    "task.progress",
-                    "task.completed",
-                    "task.failed",
-                    "api.request",
-                    "api.response",
-                    "api.retry",
-                    "api.error",
-                    "model.prompt_built",
-                    "model.stream_chunk",
-                    "model.stream_completed",
-                    "model.tool_decision",
-                    "bridge.message_sent",
-                    "bridge.message_received",
-                    "workflow.state_transition",
-                    "executor.command_prepared",
-                    "executor.command_result",
-                ],
+                "event_types": task_event_types,
             },
             {
                 "file": config.changes_log_file,
-                "event_types": [
-                    "change.file_saved",
-                    "change.memory_updated",
-                    "change.skill_loaded",
-                    "change.config_mutation",
-                    "change.execution_plan",
-                ],
+                "event_types": change_event_types,
             },
         ],
+        "event_types": {
+            "system.start": {
+                "category": "system",
+                "description": "Application or subsystem startup event.",
+            },
+            "system.shutdown": {
+                "category": "system",
+                "description": "Application or subsystem shutdown event.",
+            },
+            "system.health_check": {
+                "category": "system",
+                "description": "Health or readiness probe result.",
+            },
+            "system.config_reload": {
+                "category": "system",
+                "description": "Configuration reload or refresh event.",
+            },
+            "system.alert": {
+                "category": "system",
+                "description": "Operational alert that needs attention.",
+            },
+            "task.created": {
+                "category": "tasks",
+                "description": "A task has been created.",
+            },
+            "task.started": {
+                "category": "tasks",
+                "description": "A task has started execution.",
+            },
+            "task.progress": {
+                "category": "tasks",
+                "description": "Task progress update.",
+            },
+            "task.completed": {
+                "category": "tasks",
+                "description": "A task completed successfully.",
+            },
+            "task.failed": {
+                "category": "tasks",
+                "description": "A task failed.",
+            },
+            "api.request": {
+                "category": "tasks",
+                "description": "Outbound API request payload metadata.",
+            },
+            "api.response": {
+                "category": "tasks",
+                "description": "Inbound API response payload metadata.",
+            },
+            "api.retry": {
+                "category": "tasks",
+                "description": "API retry scheduling or attempt event.",
+            },
+            "api.error": {
+                "category": "tasks",
+                "description": "API-level failure details.",
+            },
+            "model.prompt_built": {
+                "category": "tasks",
+                "description": "Prompt assembly completed.",
+            },
+            "model.stream_started": {
+                "category": "tasks",
+                "description": "Model streaming started.",
+            },
+            "model.stream_chunk": {
+                "category": "tasks",
+                "description": "Incremental model output chunk.",
+            },
+            "model.stream_completed": {
+                "category": "tasks",
+                "description": "Model streaming finished.",
+            },
+            "model.tool_decision": {
+                "category": "tasks",
+                "description": "Model selected or declined tool usage.",
+            },
+            "bridge.message_sent": {
+                "category": "tasks",
+                "description": "Frontend-to-backend bridge message.",
+            },
+            "bridge.message_received": {
+                "category": "tasks",
+                "description": "Backend-to-frontend bridge message.",
+            },
+            "workflow.state_transition": {
+                "category": "tasks",
+                "description": "Workflow state machine transition.",
+            },
+            "executor.command_prepared": {
+                "category": "tasks",
+                "description": "Executor command prepared for dispatch.",
+            },
+            "executor.command_result": {
+                "category": "tasks",
+                "description": "Executor command result captured.",
+            },
+            "change.file_saved": {
+                "category": "changes",
+                "description": "A file mutation was persisted.",
+            },
+            "change.memory_updated": {
+                "category": "changes",
+                "description": "Memory state was updated.",
+            },
+            "change.skill_loaded": {
+                "category": "changes",
+                "description": "A skill was loaded or refreshed.",
+            },
+            "change.config_mutation": {
+                "category": "changes",
+                "description": "Configuration value was changed.",
+            },
+            "change.execution_plan": {
+                "category": "changes",
+                "description": "Execution plan was created or updated.",
+            },
+        },
+        "field_definitions": {
+            "ts": {"type": "string", "required": True, "description": "UTC ISO 8601 timestamp."},
+            "event_type": {"type": "string", "required": True, "description": "Dot-style event type identifier."},
+            "level": {"type": "string", "required": True, "description": "Standard log level."},
+            "source": {"type": "string", "required": True, "description": "Logger or module source."},
+            "trace_id": {"type": "string", "required": False, "description": "Distributed trace correlation identifier."},
+            "request_id": {"type": "string", "required": False, "description": "External request correlation identifier."},
+            "task_id": {"type": "string", "required": False, "description": "Task correlation identifier."},
+            "session_id": {"type": "string", "required": False, "description": "Session correlation identifier."},
+            "span_id": {"type": "string", "required": False, "description": "Span correlation identifier."},
+            "component": {"type": "string", "required": False, "description": "Subsystem or component name."},
+            "phase": {"type": "string", "required": False, "description": "Lifecycle phase within the component."},
+            "timing": {"type": "object", "required": False, "description": "Timing metrics such as elapsed_ms."},
+            "payload_kind": {"type": "string", "required": False, "description": "High-level payload family."},
+            "context": {"type": "object", "required": False, "description": "Structured contextual metadata."},
+            "data": {"type": "object", "required": False, "description": "Structured event payload."},
+            "error": {"type": "object", "required": False, "description": "Structured error payload or summary."},
+        },
         "recommended_fields": [
             "trace_id",
             "request_id",
@@ -231,8 +389,81 @@ def _ensure_schema_file(config: LoggingConfig, logs_dir: Path) -> None:
             "data",
             "error",
         ],
+        "example_records": {
+            config.system_log_file: [
+                {
+                    "ts": "2026-03-28T09:00:00Z",
+                    "event_type": "system.health_check",
+                    "level": "INFO",
+                    "source": "alice.core.health",
+                    "component": "startup.probe",
+                    "phase": "ready",
+                    "context": {"service": "bridge"},
+                    "data": {"status": "ok"},
+                }
+            ],
+            config.tasks_log_file: [
+                {
+                    "ts": "2026-03-28T09:00:01Z",
+                    "event_type": "api.request",
+                    "level": "INFO",
+                    "source": "alice.domain.llm",
+                    "trace_id": "tr-1",
+                    "request_id": "req-1",
+                    "task_id": "task-9",
+                    "session_id": "sess-1",
+                    "span_id": "span-1",
+                    "component": "openai.client",
+                    "phase": "send",
+                    "payload_kind": "http",
+                    "context": {"provider": "openai"},
+                    "data": {
+                        "method": "POST",
+                        "url": "https://api.openai.com/v1/responses",
+                    },
+                },
+                {
+                    "ts": "2026-03-28T09:00:02Z",
+                    "event_type": "model.stream_chunk",
+                    "level": "DEBUG",
+                    "source": "alice.domain.llm",
+                    "trace_id": "tr-1",
+                    "request_id": "req-1",
+                    "task_id": "task-9",
+                    "phase": "stream",
+                    "timing": {"elapsed_ms": 120},
+                    "payload_kind": "model_output",
+                    "data": {"chunk": "..."},
+                },
+            ],
+            config.changes_log_file: [
+                {
+                    "ts": "2026-03-28T09:00:03Z",
+                    "event_type": "change.file_saved",
+                    "level": "INFO",
+                    "source": "alice.infrastructure.bridge",
+                    "task_id": "task-9",
+                    "component": "workspace.writer",
+                    "payload_kind": "file_change",
+                    "data": {"path": "prompts/alice.md", "bytes": 2048},
+                }
+            ],
+        },
     }
-    schema_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _schema_requires_refresh(existing_payload: object, expected_payload: dict[str, object]) -> bool:
+    if not isinstance(existing_payload, dict):
+        return True
+    return _schema_comparable_view(existing_payload) != _schema_comparable_view(expected_payload)
+
+
+def _schema_comparable_view(payload: dict[str, object]) -> dict[str, object]:
+    return {
+        key: value
+        for key, value in payload.items()
+        if key != "generated_at"
+    }
 
 
 def _get_root(value: str) -> str:
