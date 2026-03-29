@@ -1,25 +1,39 @@
+from __future__ import annotations
+
 """OpenAI 兼容 LLM Provider
 
 实现 OpenAI API 兼容的 LLM 提供商。
 """
 
 import logging
+import time
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Iterator, Any
 from collections.abc import MutableMapping
 
 try:
     from openai import OpenAI, Stream
+    from openai._legacy_response import LegacyAPIResponse
     from openai.types.chat import ChatCompletion, ChatCompletionChunk
 except ImportError:
     OpenAI = None
     Stream = None
+    LegacyAPIResponse = None
 
-from backend.alice.domain.llm.providers.base import BaseLLMProvider
+from backend.alice.domain.llm.providers.base import (
+    BaseLLMProvider,
+    build_error_payload,
+    emit_observability_log,
+    sanitize_for_log,
+    summarize_messages,
+    usage_to_log_data,
+)
 from backend.alice.domain.llm.models.message import ChatMessage
 from backend.alice.domain.llm.models.stream_chunk import StreamChunk
 
 logger = logging.getLogger(__name__)
+_OPENAI_RETRY_STATE: ContextVar[dict[str, Any]] = ContextVar("openai_retry_state", default={})
 
 CURL_USER_AGENT = "curl/8.0"
 
@@ -65,6 +79,55 @@ def ensure_curl_user_agent(headers: MutableMapping[str, Any] | dict | None = Non
     normalized_headers = dict(headers or {})
     normalized_headers["User-Agent"] = CURL_USER_AGENT
     return normalized_headers
+
+
+if OpenAI is not None:
+
+    class LoggingOpenAI(OpenAI):
+        """在 OpenAI SDK 重试点补充结构化日志。"""
+
+        def __init__(self, *args: Any, retry_callback: Any = None, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            self._retry_callback = retry_callback
+
+        def _sleep_for_retry(
+            self,
+            *,
+            retries_taken: int,
+            max_retries: int,
+            options: Any,
+            response: Any,
+        ) -> None:
+            remaining_retries = max_retries - retries_taken
+            timeout = self._calculate_retry_timeout(
+                remaining_retries,
+                options,
+                response.headers if response else None,
+            )
+
+            if self._retry_callback is not None:
+                status_code = getattr(response, "status_code", None)
+                reason = f"http_{status_code}" if status_code is not None else "transport_error"
+                request_path = str(getattr(options, "url", "") or "")
+                try:
+                    if hasattr(options, "url") and options.url is not None:
+                        request_path = str(getattr(options.url, "path", "") or options.url)
+                except Exception:
+                    request_path = str(getattr(options, "url", "") or "")
+
+                self._retry_callback(
+                    attempt=retries_taken + 1,
+                    max_retries=max_retries,
+                    backoff_seconds=timeout,
+                    reason=reason,
+                    request_path=request_path,
+                    status_code=status_code,
+                )
+
+            time.sleep(timeout)
+
+else:
+    LoggingOpenAI = None
 
 
 @dataclass
@@ -138,16 +201,18 @@ class OpenAIProvider(BaseLLMProvider):
         self.config = config
         self._client: OpenAI | None = None
         self._header_rotator = RequestHeaderRotator(config.request_header_profiles)
+        self._stream_retry_state: dict[int, dict[str, Any]] = {}
 
     @property
     def client(self) -> OpenAI:
         """延迟初始化 OpenAI 客户端"""
         if self._client is None:
-            self._client = OpenAI(
+            self._client = LoggingOpenAI(
                 api_key=self.config.api_key,
                 base_url=self.config.base_url,
                 timeout=self.config.timeout,
                 max_retries=self.config.max_retries,
+                retry_callback=self._log_retry_event,
             )
         return self._client
 
@@ -162,6 +227,127 @@ class OpenAIProvider(BaseLLMProvider):
             logger.debug(f"使用请求头 profile #{self._header_rotator._current_index - 1}")
 
         return headers
+
+    def _log_retry_event(
+        self,
+        *,
+        attempt: int,
+        max_retries: int,
+        backoff_seconds: float,
+        reason: str,
+        request_path: str,
+        status_code: int | None,
+    ) -> None:
+        retry_state = _OPENAI_RETRY_STATE.get({})
+        request_kwargs = retry_state.get("kwargs")
+        emit_observability_log(
+            logger,
+            level=logging.WARNING,
+            event_type="api.retry",
+            component="llm.provider.openai",
+            phase="retry",
+            payload_kind="chat.completions",
+            kwargs=request_kwargs,
+            data={
+                "provider": "openai",
+                "model": retry_state.get("model", self.model_name),
+                "base_url": retry_state.get("base_url", self.config.base_url),
+                "request_path": request_path,
+                "stream": retry_state.get("stream"),
+                "request_count": retry_state.get("request_count", self.request_count),
+                "attempt": attempt,
+                "max_retries": max_retries,
+                "backoff_seconds": backoff_seconds,
+                "reason": reason,
+                "status_code": status_code,
+            },
+            timing={"backoff_seconds": backoff_seconds},
+            message="api.retry",
+        )
+
+    @staticmethod
+    def _request_path() -> str:
+        return "/chat/completions"
+
+    @staticmethod
+    def _response_id(response: Any) -> str:
+        return str(getattr(response, "id", "") or "")
+
+    @staticmethod
+    def _status_code(raw_response: LegacyAPIResponse | None) -> int | None:
+        if raw_response is None:
+            return None
+        return getattr(raw_response, "status_code", None)
+
+    @staticmethod
+    def _response_request_id(raw_response: LegacyAPIResponse | None) -> str:
+        if raw_response is None:
+            return ""
+        headers = getattr(raw_response, "headers", None) or {}
+        return str(headers.get("x-request-id", "") or "")
+
+    @staticmethod
+    def _finish_reason(response: Any) -> str:
+        choices = getattr(response, "choices", None) or []
+        if not choices:
+            return ""
+        return str(getattr(choices[0], "finish_reason", "") or "")
+
+    @staticmethod
+    def _output_length(response: Any, *, stream: bool) -> int:
+        if stream:
+            return 0
+
+        choices = getattr(response, "choices", None) or []
+        if not choices:
+            return 0
+
+        message = getattr(choices[0], "message", None)
+        content = getattr(message, "content", "") if message else ""
+        thinking = ""
+        if message:
+            for field in (
+                "reasoning_content",
+                "reasoningContent",
+                "reasoning",
+                "thought",
+                "thought_content",
+                "thoughtContent",
+            ):
+                candidate = getattr(message, field, None)
+                if candidate:
+                    thinking = str(candidate)
+                    break
+        return len(content or "") + len(thinking or "")
+
+    def _emit_provider_log(
+        self,
+        *,
+        event_type: str,
+        phase: str,
+        payload_kind: str,
+        kwargs: dict[str, Any],
+        data: dict[str, Any],
+        error: dict[str, Any] | None = None,
+        timing: dict[str, Any] | None = None,
+        level: int = logging.INFO,
+        message: str | None = None,
+        exc_info: Any = None,
+    ) -> None:
+        emit_observability_log(
+            logger,
+            level=level,
+            event_type=event_type,
+            component="llm.provider.openai",
+            phase=phase,
+            payload_kind=payload_kind,
+            kwargs=kwargs,
+            data=data,
+            error=error,
+            timing=timing,
+            message=message,
+            exc_info=exc_info,
+        )
 
     def _make_chat_request(
         self,
@@ -181,29 +367,130 @@ class OpenAIProvider(BaseLLMProvider):
         """
         # 转换消息格式
         api_messages = [msg.to_dict() for msg in messages]
+        extra_headers = self._get_extra_headers()
+        request_path = self._request_path()
+        request_timeout = kwargs.get("timeout", self.config.timeout)
 
         # 构建请求参数
         params = {
             "model": self.model_name,
             "messages": api_messages,
             "stream": stream,
-            "extra_headers": self._get_extra_headers(),
+            "extra_headers": extra_headers,
         }
 
         # 合并额外参数
         params.update(kwargs)
+        request_payload = sanitize_for_log(params)
+        request_state = {
+            "kwargs": kwargs,
+            "model": self.model_name,
+            "base_url": self.config.base_url,
+            "stream": stream,
+            "request_count": self.request_count,
+        }
+        retry_token = _OPENAI_RETRY_STATE.set(request_state)
+        started_at = time.perf_counter()
 
-        logger.debug(
-            f"发送 OpenAI 请求: model={self.model_name}, "
-            f"messages={len(api_messages)}, stream={stream}"
+        self._emit_provider_log(
+            event_type="api.request",
+            phase="request",
+            payload_kind="chat.completions",
+            kwargs=kwargs,
+            data={
+                "provider": "openai",
+                "base_url": self.config.base_url,
+                "request_path": request_path,
+                "model": self.model_name,
+                "stream": stream,
+                "timeout": request_timeout,
+                "max_retries": self.config.max_retries,
+                "request_count": self.request_count,
+                "extra_headers": sanitize_for_log(extra_headers),
+                "request_params": sanitize_for_log(
+                    {key: value for key, value in params.items() if key != "messages"}
+                ),
+                "messages": sanitize_for_log(api_messages),
+                **summarize_messages(messages),
+                "payload": request_payload,
+            },
+            message="api.request",
         )
 
         try:
-            response = self.client.chat.completions.create(**params)
+            raw_response = self.client.chat.completions.with_raw_response.create(**params)
+            response = raw_response.parse()
+            latency_ms = round((time.perf_counter() - started_at) * 1000, 3)
+
+            response_usage = usage_to_log_data(getattr(response, "usage", None))
+            response_request_id = self._response_request_id(raw_response)
+            effective_kwargs = kwargs
+            if response_request_id and not effective_kwargs.get("request_id"):
+                effective_kwargs = {**kwargs, "request_id": response_request_id}
+
+            self._emit_provider_log(
+                event_type="api.response",
+                phase="response",
+                payload_kind="chat.completions",
+                kwargs=effective_kwargs,
+                data={
+                    "provider": "openai",
+                    "model": getattr(response, "model", self.model_name) or self.model_name,
+                    "response_id": self._response_id(response),
+                    "request_path": request_path,
+                    "stream": stream,
+                    "status_code": self._status_code(raw_response),
+                    "finish_reason": self._finish_reason(response),
+                    "usage": response_usage,
+                    "output_length": self._output_length(response, stream=stream),
+                    "retries_taken": getattr(raw_response, "retries_taken", 0),
+                    "response_request_id": response_request_id,
+                },
+                timing={"latency_ms": latency_ms},
+                message="api.response",
+            )
+            if stream:
+                self._stream_retry_state[id(response)] = request_state
             return response
         except Exception as e:
-            logger.error(f"OpenAI 请求失败: {e}")
+            latency_ms = round((time.perf_counter() - started_at) * 1000, 3)
+            status_code = getattr(e, "status_code", None)
+            response_body = getattr(e, "body", None)
+            error_request_id = str(getattr(e, "request_id", "") or "")
+            effective_kwargs = kwargs
+            if error_request_id and not effective_kwargs.get("request_id"):
+                effective_kwargs = {**kwargs, "request_id": error_request_id}
+
+            self._emit_provider_log(
+                event_type="api.error",
+                phase="error",
+                payload_kind="chat.completions",
+                kwargs=effective_kwargs,
+                data={
+                    "provider": "openai",
+                    "base_url": self.config.base_url,
+                    "request_path": request_path,
+                    "model": self.model_name,
+                    "stream": stream,
+                    "timeout": request_timeout,
+                    "max_retries": self.config.max_retries,
+                    "request_count": self.request_count,
+                    "status_code": status_code,
+                    "response_body": sanitize_for_log(response_body),
+                },
+                error=build_error_payload(
+                    e,
+                    status_code=status_code,
+                    request_id=error_request_id,
+                ),
+                timing={"latency_ms": latency_ms},
+                level=logging.ERROR,
+                message="api.error",
+                exc_info=True,
+            )
             raise
+        finally:
+            _OPENAI_RETRY_STATE.reset(retry_token)
 
     def _extract_stream_chunks(self, response) -> Iterator[StreamChunk]:
         """从 OpenAI 流式响应中提取数据块
@@ -214,12 +501,33 @@ class OpenAIProvider(BaseLLMProvider):
         Yields:
             StreamChunk 实例
         """
+        retry_state = self._stream_retry_state.pop(id(response), {})
+        retry_token = _OPENAI_RETRY_STATE.set(retry_state)
         try:
             for chunk in response:
                 yield StreamChunk.from_openai_chunk(chunk)
         except Exception as e:
-            logger.error(f"流式响应解析失败: {e}")
+            self._emit_provider_log(
+                event_type="api.error",
+                phase="error",
+                payload_kind="chat.completions.stream",
+                kwargs=retry_state.get("kwargs", {}),
+                data={
+                    "provider": "openai",
+                    "base_url": self.config.base_url,
+                    "request_path": self._request_path(),
+                    "model": self.model_name,
+                    "stream": True,
+                    "request_count": retry_state.get("request_count", self.request_count),
+                },
+                error=build_error_payload(e),
+                level=logging.ERROR,
+                message="api.error",
+                exc_info=True,
+            )
             raise
+        finally:
+            _OPENAI_RETRY_STATE.reset(retry_token)
 
     def count_tokens(self, messages: list[ChatMessage]) -> int:
         """计算 Token 数量

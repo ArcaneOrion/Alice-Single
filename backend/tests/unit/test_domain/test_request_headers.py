@@ -8,6 +8,7 @@ import unittest
 
 from backend.alice.domain.llm.providers.openai_provider import (
     CURL_USER_AGENT,
+    DEFAULT_REQUEST_HEADER_PROFILES,
     RequestHeaderRotator,
     ensure_curl_user_agent,
     resolve_request_header_profiles,
@@ -68,6 +69,26 @@ class TestRequestHeaders(unittest.TestCase):
         self.assertEqual(second_headers, profiles[1])
         self.assertEqual(third_index, 0)
         self.assertEqual(third_headers, profiles[0])
+
+    def test_request_header_rotator_handles_no_profiles(self) -> None:
+        """空轮换配置应返回空 profile，避免抛错。"""
+        rotator = RequestHeaderRotator([])
+        index, headers = rotator.next_profile()
+        self.assertEqual(index, 0)
+        self.assertEqual(headers, {})
+
+    def test_default_profiles_copy_preserves_curl_user_agent(self) -> None:
+        """默认轮询表按需拷贝，不会暴露旧表或泄露 UA。"""
+        profiles = resolve_request_header_profiles(
+            "https://openai.api-test.us.ci/v1",
+            None,
+        )
+
+        for profile in profiles:
+            self.assertEqual(profile["User-Agent"], CURL_USER_AGENT)
+
+        profiles[0]["User-Agent"] = "x"
+        self.assertEqual(DEFAULT_REQUEST_HEADER_PROFILES[0]["User-Agent"], CURL_USER_AGENT)
 
 
 if __name__ == "__main__":
