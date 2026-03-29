@@ -34,6 +34,17 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 use crate::bridge::protocol::message::{BridgeMessage, StatusContent};
 use crate::bridge::transport::stdio_transport::{ChildStdinWrapper, StdioTransport};
 use crate::bridge::{BridgeError, BridgeResult};
+use crate::util::runtime_log::runtime_log;
+
+fn summarize_text(text: &str, limit: usize) -> String {
+    let normalized = text.replace('\n', "\\n");
+    if normalized.chars().count() <= limit {
+        normalized
+    } else {
+        let trimmed: String = normalized.chars().take(limit).collect();
+        format!("{trimmed}...")
+    }
+}
 
 /// Python 桥接客户端
 ///
@@ -88,7 +99,30 @@ impl BridgeClient {
     ///
     /// 返回初始化完成的客户端实例。
     pub fn spawn(bridge_path: &str) -> BridgeResult<Self> {
-        let (transport, message_rx, error_rx) = StdioTransport::spawn(bridge_path)?;
+        runtime_log(
+            "bridge.client",
+            "system.start",
+            &format!(
+                "phase=bridge_client.spawn.start bridge_path={}",
+                bridge_path
+            ),
+        );
+        let (transport, message_rx, error_rx) = match StdioTransport::spawn(bridge_path) {
+            Ok(parts) => parts,
+            Err(err) => {
+                runtime_log(
+                    "bridge.client",
+                    "bridge.error",
+                    &format!("phase=bridge_client.spawn error={}", err),
+                );
+                return Err(err.into());
+            }
+        };
+        runtime_log(
+            "bridge.client",
+            "system.start",
+            "phase=bridge_client.spawn.connected state=connected",
+        );
 
         Ok(Self {
             transport,
@@ -104,6 +138,15 @@ impl BridgeClient {
     ///
     /// - `input`: 用户输入的文本
     pub fn send_input(&mut self, input: &str) -> BridgeResult<()> {
+        runtime_log(
+            "bridge.client",
+            "bridge.message_sent",
+            &format!(
+                "direction=frontend->backend message_type=user_input message_length={} summary={}",
+                input.len(),
+                summarize_text(input, 120)
+            ),
+        );
         self.transport.send_text(input)?;
         Ok(())
     }
@@ -112,6 +155,11 @@ impl BridgeClient {
     ///
     /// 这将通知 Python 停止当前操作并返回空闲状态。
     pub fn send_interrupt(&mut self) -> BridgeResult<()> {
+        runtime_log(
+            "bridge.client",
+            "bridge.interrupt",
+            "direction=frontend->backend phase=bridge_client.send_interrupt",
+        );
         self.transport.send_interrupt()?;
         Ok(())
     }
@@ -125,9 +173,29 @@ impl BridgeClient {
     /// - `None`: 通道无消息
     pub fn try_recv_message(&self) -> Option<Result<BridgeMessage, BridgeError>> {
         match self.message_rx.try_recv() {
-            Ok(msg) => Some(Ok(msg)),
+            Ok(msg) => {
+                if let BridgeMessage::Error { content } = &msg {
+                    runtime_log(
+                        "bridge.client",
+                        "bridge.error",
+                        &format!(
+                            "phase=message_channel.recv message_type=error content_length={} summary={}",
+                            content.len(),
+                            summarize_text(content, 120)
+                        ),
+                    );
+                }
+                Some(Ok(msg))
+            }
             Err(TryRecvError::Empty) => None,
-            Err(TryRecvError::Disconnected) => Some(Err(BridgeError::ChannelClosed)),
+            Err(TryRecvError::Disconnected) => {
+                runtime_log(
+                    "bridge.client",
+                    "bridge.eof",
+                    "phase=message_channel.recv reason=channel_closed",
+                );
+                Some(Err(BridgeError::ChannelClosed))
+            }
         }
     }
 
@@ -144,7 +212,29 @@ impl BridgeClient {
 
     /// 尝试接收一条错误消息 (非阻塞)
     pub fn try_recv_error(&self) -> Option<String> {
-        self.error_rx.try_recv().ok()
+        match self.error_rx.try_recv() {
+            Ok(err) => {
+                runtime_log(
+                    "bridge.client",
+                    "bridge.error",
+                    &format!(
+                        "phase=error_channel.recv message_length={} summary={}",
+                        err.len(),
+                        summarize_text(&err, 120)
+                    ),
+                );
+                Some(err)
+            }
+            Err(TryRecvError::Empty) => None,
+            Err(TryRecvError::Disconnected) => {
+                runtime_log(
+                    "bridge.client",
+                    "bridge.eof",
+                    "phase=error_channel.recv reason=channel_closed",
+                );
+                None
+            }
+        }
     }
 
     /// 获取消息接收器的引用
@@ -180,7 +270,10 @@ impl BridgeClient {
     /// 处理状态消息 (内部使用)
     pub fn handle_status_message(&mut self, content: &StatusContent) {
         match content {
-            StatusContent::Ready => self.state = ClientState::Ready,
+            StatusContent::Ready => {
+                self.state = ClientState::Ready;
+                runtime_log("bridge.client", "system.start", "phase=backend.ready state=ready");
+            }
             StatusContent::Done => self.state = ClientState::Ready,
             _ => {}
         }
@@ -188,8 +281,10 @@ impl BridgeClient {
 
     /// 终止 Python 进程
     pub fn shutdown(mut self) -> BridgeResult<()> {
+        runtime_log("bridge.client", "system.shutdown", "phase=bridge_client.shutdown.start");
         self.transport.kill()?;
         self.state = ClientState::Disconnected;
+        runtime_log("bridge.client", "system.shutdown", "phase=bridge_client.shutdown.done");
         Ok(())
     }
 

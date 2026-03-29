@@ -5,10 +5,11 @@ Bridge Server
 这是 Bridge Infrastructure 模块的核心组件。
 """
 
+import json
 import logging
 import os
 import traceback
-from typing import TYPE_CHECKING, Optional, Type
+from typing import TYPE_CHECKING, Any, Optional, Type
 
 from .protocol import (
     StatusType,
@@ -50,6 +51,52 @@ def _bridge_log_extra(
     if error is not None:
         payload["error"] = error
     return payload
+
+
+def _summarize_text(text: str, limit: int = 120) -> str:
+    """生成日志摘要，避免输出完整内容。"""
+    cleaned = text.replace("\n", "\\n")
+    if len(cleaned) <= limit:
+        return cleaned
+    return f"{cleaned[:limit]}..."
+
+
+def _summarize_frontend_message(message: str) -> dict[str, Any]:
+    """提取前端输入消息元信息。"""
+    message_type = "interrupt" if message == INTERRUPT_SIGNAL else "user_input"
+    return {
+        "direction": "frontend->backend",
+        "message_type": message_type,
+        "message_length": len(message),
+        "message_summary": _summarize_text(message),
+    }
+
+
+def _summarize_output_message(message: OutputMessage) -> dict[str, Any]:
+    """提取输出消息元信息。"""
+    msg_type = "unknown"
+    content_summary = ""
+    content_length = 0
+
+    if isinstance(message, dict):
+        msg_type = str(message.get("type", "unknown"))
+        content = message.get("content")
+        if isinstance(content, str):
+            content_length = len(content)
+            content_summary = _summarize_text(content)
+
+    try:
+        payload_length = len(json.dumps(message, ensure_ascii=False))
+    except TypeError:
+        payload_length = len(str(message))
+
+    return {
+        "direction": "backend->frontend",
+        "message_type": msg_type,
+        "payload_length": payload_length,
+        "content_length": content_length,
+        "message_summary": content_summary,
+    }
 
 
 # 默认的 StreamManager 类（允许外部注入替代实现）
@@ -98,8 +145,8 @@ class BridgeServer:
             logger.warning(
                 "BridgeServer already running",
                 extra=_bridge_log_extra(
-                    "bridge_already_running",
-                    data={"reason": "already_running"},
+                    "system.start",
+                    data={"phase": "bridge_server.start", "reason": "already_running"},
                 ),
             )
             return
@@ -107,8 +154,11 @@ class BridgeServer:
         logger.info(
             "Bridge server starting",
             extra=_bridge_log_extra(
-                "bridge_start",
-                data={"transport": type(self.transport).__name__},
+                "system.start",
+                data={
+                    "phase": "bridge_server.start",
+                    "transport": type(self.transport).__name__,
+                },
             ),
         )
 
@@ -125,7 +175,10 @@ class BridgeServer:
         self.send_status(StatusType.READY)
         logger.info(
             "Bridge server ready",
-            extra=_bridge_log_extra("bridge_ready"),
+            extra=_bridge_log_extra(
+                "system.start",
+                data={"phase": "bridge_server.ready"},
+            ),
         )
 
     def stop(self) -> None:
@@ -137,7 +190,10 @@ class BridgeServer:
         self.transport.stop()
         logger.info(
             "Bridge server stopped",
-            extra=_bridge_log_extra("bridge_stop"),
+            extra=_bridge_log_extra(
+                "system.shutdown",
+                data={"phase": "bridge_server.stop"},
+            ),
         )
 
     def run(self) -> None:
@@ -155,7 +211,10 @@ class BridgeServer:
         except KeyboardInterrupt:
             logger.info(
                 "Bridge server interrupted by keyboard",
-                extra=_bridge_log_extra("bridge_interrupt"),
+                extra=_bridge_log_extra(
+                    "bridge.interrupt",
+                    data={"phase": "run_loop", "source": "keyboard_interrupt"},
+                ),
             )
         finally:
             self.stop()
@@ -169,7 +228,7 @@ class BridgeServer:
         Args:
             message: 消息字典
         """
-        self.transport.send_message(message)
+        self._send_message_with_logging(message, raw=False)
 
     def send_raw_message(self, message: OutputMessage) -> None:
         """
@@ -178,7 +237,35 @@ class BridgeServer:
         Args:
             message: 消息字典
         """
-        self.transport.send_message(message)
+        self._send_message_with_logging(message, raw=True)
+
+    def _send_message_with_logging(self, message: OutputMessage, *, raw: bool) -> None:
+        """发送消息并记录结构化可观测日志。"""
+        message_data = _summarize_output_message(message)
+        message_data["raw"] = raw
+        logger.info(
+            "Bridge message sent",
+            extra=_bridge_log_extra("bridge.message_sent", data=message_data),
+        )
+        try:
+            self.transport.send_message(message)
+        except Exception as e:
+            logger.error(
+                "Bridge transport send failed",
+                exc_info=True,
+                extra=_bridge_log_extra(
+                    "bridge.error",
+                    data={
+                        "phase": "transport.send",
+                        **message_data,
+                    },
+                    error={
+                        "type": type(e).__name__,
+                        "message": str(e),
+                    },
+                ),
+            )
+            raise
 
     def send_status(self, status: StatusType | str) -> None:
         """
@@ -233,6 +320,18 @@ class BridgeServer:
             content: 错误内容
             code: 错误代码
         """
+        logger.error(
+            "Bridge error emitted",
+            extra=_bridge_log_extra(
+                "bridge.error",
+                data={
+                    "phase": "send_error",
+                    "code": code,
+                    "content_length": len(content),
+                    "content_summary": _summarize_text(content),
+                },
+            ),
+        )
         self.send_message({"type": "error", "content": content, "code": code})
 
     # ========== 传输层回调 ==========
@@ -245,24 +344,30 @@ class BridgeServer:
             message: 接收到的消息字符串
         """
         try:
+            incoming_data = _summarize_frontend_message(message)
+            logger.info(
+                "Bridge message received",
+                extra=_bridge_log_extra("bridge.message_received", data=incoming_data),
+            )
+
             # 检查是否为中断信号
             if message == INTERRUPT_SIGNAL:
                 logger.info(
                     "Bridge interrupt signal received",
-                    extra=_bridge_log_extra("bridge_interrupt"),
+                    extra=_bridge_log_extra(
+                        "bridge.interrupt",
+                        data={
+                            "phase": "input_callback",
+                            "source": "frontend_signal",
+                            **incoming_data,
+                        },
+                    ),
                 )
                 self.interrupt_handler.check_interrupt()
                 return
 
             # 处理用户输入
             if self.agent is not None:
-                logger.info(
-                    "Bridge message received",
-                    extra=_bridge_log_extra(
-                        "bridge_message_received",
-                        data={"message_length": len(message)},
-                    ),
-                )
                 self.message_handler.handle_input(message)
 
         except Exception as e:
@@ -271,11 +376,12 @@ class BridgeServer:
                 "Bridge message handling failed",
                 exc_info=True,
                 extra=_bridge_log_extra(
-                    "bridge_message_error",
+                    "bridge.error",
                     context={
                         "message_preview": message[:120],
                     },
                     data={
+                        "phase": "input_callback",
                         "message_length": len(message),
                     },
                     error={
@@ -291,7 +397,10 @@ class BridgeServer:
         """接收到 EOF 时的回调。"""
         logger.info(
             "Bridge EOF received",
-            extra=_bridge_log_extra("bridge_eof"),
+            extra=_bridge_log_extra(
+                "bridge.eof",
+                data={"phase": "stdin_reader", "source": "transport"},
+            ),
         )
         self._running = False
 
@@ -339,7 +448,6 @@ def main_with_agent(agent_class=None, **agent_kwargs) -> None:
         **agent_kwargs: Agent 初始化参数
     """
     import sys
-    import json
 
     # 强制切换到脚本所在目录（根目录）
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -361,7 +469,7 @@ def main_with_agent(agent_class=None, **agent_kwargs) -> None:
         logger.error(
             "Bridge agent initialization failed",
             extra=_bridge_log_extra(
-                "bridge_runtime_error",
+                "bridge.error",
                 data={"phase": "initialization"},
                 error={
                     "type": type(e).__name__,
@@ -379,19 +487,29 @@ def main_with_agent(agent_class=None, **agent_kwargs) -> None:
     # 创建并运行服务器
     server = create_bridge_server(agent=agent)
 
+    logger.info(
+        "Bridge runtime start",
+        extra=_bridge_log_extra(
+            "system.start",
+            data={"phase": "bridge_runtime.run"},
+        ),
+    )
     try:
         server.run()
     except EOFError:
         logger.info(
             "Bridge EOFError received",
-            extra=_bridge_log_extra("bridge_eof"),
+            extra=_bridge_log_extra(
+                "bridge.eof",
+                data={"phase": "bridge_runtime.run", "source": "EOFError"},
+            ),
         )
     except Exception as e:
         error_trace = traceback.format_exc()
         logger.error(
             "Bridge runtime error",
             extra=_bridge_log_extra(
-                "bridge_runtime_error",
+                "bridge.error",
                 data={"phase": "run"},
                 error={
                     "type": type(e).__name__,
@@ -404,6 +522,14 @@ def main_with_agent(agent_class=None, **agent_kwargs) -> None:
             "type": "error",
             "content": f"Runtime Error: {str(e)}. 请查看日志输出。"
         }), flush=True)
+    finally:
+        logger.info(
+            "Bridge runtime shutdown",
+            extra=_bridge_log_extra(
+                "system.shutdown",
+                data={"phase": "bridge_runtime.exit"},
+            ),
+        )
 
 
 __all__ = [

@@ -26,8 +26,40 @@ use std::process::{Child, ChildStdin, Stdio};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
-use crate::bridge::BridgeMessage;
 use crate::bridge::protocol::codec::JsonLinesCodec;
+use crate::bridge::BridgeMessage;
+use crate::util::runtime_log::runtime_log;
+
+fn summarize_text(text: &str, limit: usize) -> String {
+    let normalized = text.replace('\n', "\\n");
+    if normalized.chars().count() <= limit {
+        normalized
+    } else {
+        let trimmed: String = normalized.chars().take(limit).collect();
+        format!("{trimmed}...")
+    }
+}
+
+fn summarize_bridge_message(msg: &BridgeMessage) -> (&'static str, String) {
+    match msg {
+        BridgeMessage::Status { content } => ("status", format!("status={}", content)),
+        BridgeMessage::Thinking { content } => ("thinking", summarize_text(content, 120)),
+        BridgeMessage::Content { content } => ("content", summarize_text(content, 120)),
+        BridgeMessage::Tokens {
+            total,
+            prompt,
+            completion,
+        } => (
+            "tokens",
+            format!(
+                "total={},prompt={},completion={}",
+                total, prompt, completion
+            ),
+        ),
+        BridgeMessage::Error { content } => ("error", summarize_text(content, 120)),
+        BridgeMessage::Interrupt => ("interrupt", "__INTERRUPT__".to_string()),
+    }
+}
 
 /// 子进程标准输入的包装器
 ///
@@ -94,6 +126,12 @@ impl StdioTransport {
     pub fn spawn(
         bridge_path: &str,
     ) -> std::io::Result<(Self, Receiver<BridgeMessage>, Receiver<String>)> {
+        runtime_log(
+            "bridge.transport",
+            "system.start",
+            &format!("phase=backend.spawn.start bridge_path={}", bridge_path),
+        );
+
         // 启动 Python 子进程 (使用 -u 禁用缓冲)
         let mut child = std::process::Command::new("python3")
             .arg("-u")
@@ -102,21 +140,38 @@ impl StdioTransport {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()?;
+        runtime_log(
+            "bridge.transport",
+            "system.start",
+            &format!("phase=backend.spawn.ok pid={}", child.id()),
+        );
 
-        let stdin = child.stdin.take().ok_or(std::io::Error::new(
-            std::io::ErrorKind::BrokenPipe,
-            "Failed to open stdin",
-        ))?;
+        let stdin = child.stdin.take().ok_or_else(|| {
+            runtime_log(
+                "bridge.transport",
+                "bridge.error",
+                "phase=backend.spawn.stdin error=Failed to open stdin",
+            );
+            std::io::Error::new(std::io::ErrorKind::BrokenPipe, "Failed to open stdin")
+        })?;
 
-        let stdout = child.stdout.take().ok_or(std::io::Error::new(
-            std::io::ErrorKind::BrokenPipe,
-            "Failed to open stdout",
-        ))?;
+        let stdout = child.stdout.take().ok_or_else(|| {
+            runtime_log(
+                "bridge.transport",
+                "bridge.error",
+                "phase=backend.spawn.stdout error=Failed to open stdout",
+            );
+            std::io::Error::new(std::io::ErrorKind::BrokenPipe, "Failed to open stdout")
+        })?;
 
-        let stderr = child.stderr.take().ok_or(std::io::Error::new(
-            std::io::ErrorKind::BrokenPipe,
-            "Failed to open stderr",
-        ))?;
+        let stderr = child.stderr.take().ok_or_else(|| {
+            runtime_log(
+                "bridge.transport",
+                "bridge.error",
+                "phase=backend.spawn.stderr error=Failed to open stderr",
+            );
+            std::io::Error::new(std::io::ErrorKind::BrokenPipe, "Failed to open stderr")
+        })?;
 
         // 创建消息通道
         let (tx, rx): (Sender<BridgeMessage>, Receiver<BridgeMessage>) = mpsc::channel();
@@ -124,27 +179,100 @@ impl StdioTransport {
 
         // 启动 stdout 读取线程
         thread::spawn(move || {
+            runtime_log("bridge.transport", "system.start", "phase=stdout_reader.start");
             let codec = JsonLinesCodec::new();
             let reader = BufReader::new(stdout);
-            for line in reader.lines() {
-                if let Ok(l) = line {
-                    if let Ok(msg) = codec.decode(&l) {
-                        let _ = tx.send(msg);
+            for line_result in reader.lines() {
+                match line_result {
+                    Ok(line) => {
+                        let line_len = line.len();
+                        match codec.decode(&line) {
+                            Ok(msg) => {
+                                let (message_type, summary) = summarize_bridge_message(&msg);
+                                runtime_log(
+                                    "bridge.transport",
+                                    "bridge.message_received",
+                                    &format!(
+                                        "direction=backend->frontend message_type={} payload_length={} summary={}",
+                                        message_type,
+                                        line_len,
+                                        summary
+                                    ),
+                                );
+                                if tx.send(msg).is_err() {
+                                    runtime_log(
+                                        "bridge.transport",
+                                        "bridge.eof",
+                                        "phase=stdout_reader.send reason=message_channel_closed",
+                                    );
+                                    break;
+                                }
+                            }
+                            Err(err) => {
+                                runtime_log(
+                                    "bridge.transport",
+                                    "bridge.error",
+                                    &format!(
+                                        "phase=stdout_reader.decode payload_length={} error={}",
+                                        line_len, err
+                                    ),
+                                );
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        runtime_log(
+                            "bridge.transport",
+                            "bridge.error",
+                            &format!("phase=stdout_reader.read error={}", err),
+                        );
+                        break;
                     }
                 }
             }
+            runtime_log("bridge.transport", "bridge.eof", "phase=stdout_reader.eof");
+            runtime_log("bridge.transport", "system.shutdown", "phase=stdout_reader.stop");
         });
 
         // 启动 stderr 读取线程
         thread::spawn(move || {
+            runtime_log("bridge.transport", "system.start", "phase=stderr_reader.start");
             let reader = BufReader::new(stderr);
-            for line in reader.lines() {
-                if let Ok(l) = line {
-                    if !l.trim().is_empty() {
-                        let _ = err_tx.send(l);
+            for line_result in reader.lines() {
+                match line_result {
+                    Ok(line) => {
+                        if !line.trim().is_empty() {
+                            runtime_log(
+                                "bridge.transport",
+                                "bridge.stderr",
+                                &format!(
+                                    "phase=stderr_reader.line message_length={} summary={}",
+                                    line.len(),
+                                    summarize_text(&line, 120)
+                                ),
+                            );
+                            if err_tx.send(line).is_err() {
+                                runtime_log(
+                                    "bridge.transport",
+                                    "bridge.eof",
+                                    "phase=stderr_reader.send reason=error_channel_closed",
+                                );
+                                break;
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        runtime_log(
+                            "bridge.transport",
+                            "bridge.error",
+                            &format!("phase=stderr_reader.read error={}", err),
+                        );
+                        break;
                     }
                 }
             }
+            runtime_log("bridge.transport", "bridge.eof", "phase=stderr_reader.eof");
+            runtime_log("bridge.transport", "system.shutdown", "phase=stderr_reader.stop");
         });
 
         Ok((
@@ -195,13 +323,17 @@ impl StdioTransport {
     ///
     /// 返回写入的字节数，或错误。
     pub fn send_text(&mut self, text: &str) -> std::io::Result<usize> {
-        writeln!(&mut self.stdin.0, "{}", text)?;
-        Ok(text.len() + 1) // +1 for newline
+        self.send_line(text, "user_input")
     }
 
     /// 发送中断信号到 Python
     pub fn send_interrupt(&mut self) -> std::io::Result<()> {
-        self.send_text("__INTERRUPT__").map(|_| ())
+        runtime_log(
+            "bridge.transport",
+            "bridge.interrupt",
+            "direction=frontend->backend phase=send_interrupt signal=__INTERRUPT__",
+        );
+        self.send_line("__INTERRUPT__", "interrupt").map(|_| ())
     }
 
     /// 获取 stdin 写入器的引用
@@ -216,7 +348,54 @@ impl StdioTransport {
 
     /// 终止子进程
     pub fn kill(mut self) -> std::io::Result<()> {
-        self.child.kill()
+        let pid = self.child.id();
+        runtime_log(
+            "bridge.transport",
+            "system.shutdown",
+            &format!("phase=backend.kill.start pid={}", pid),
+        );
+        let result = self.child.kill();
+        if let Err(err) = &result {
+            runtime_log("bridge.transport", "bridge.error", &format!("phase=backend.kill error={}", err));
+        } else {
+            runtime_log(
+                "bridge.transport",
+                "system.shutdown",
+                &format!("phase=backend.kill.ok pid={}", pid),
+            );
+        }
+        result
+    }
+
+    fn send_line(&mut self, text: &str, message_type: &str) -> std::io::Result<usize> {
+        match writeln!(&mut self.stdin.0, "{}", text) {
+            Ok(_) => {
+                runtime_log(
+                    "bridge.transport",
+                    "bridge.message_sent",
+                    &format!(
+                        "direction=frontend->backend message_type={} message_length={} summary={}",
+                        message_type,
+                        text.len(),
+                        summarize_text(text, 120)
+                    ),
+                );
+                Ok(text.len() + 1) // +1 for newline
+            }
+            Err(err) => {
+                runtime_log(
+                    "bridge.transport",
+                    "bridge.error",
+                    &format!(
+                        "phase=stdin_writer.write message_type={} message_length={} error={}",
+                        message_type,
+                        text.len(),
+                        err
+                    ),
+                );
+                Err(err)
+            }
+        }
     }
 }
 

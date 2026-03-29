@@ -27,22 +27,40 @@
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event},
     execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{Terminal, backend::CrosstermBackend};
+use ratatui::{backend::CrosstermBackend, Terminal};
 
 use std::io;
 use std::time::{Duration, Instant};
 
 use alice_frontend::app::state::App;
 use alice_frontend::bridge::client::BridgeClient;
-use alice_frontend::core::dispatcher::{EventDispatcher, drain_bridge_messages};
+use alice_frontend::core::dispatcher::{drain_bridge_messages, is_actionable_stderr_error, EventDispatcher};
 use alice_frontend::core::event::EventBus;
 use alice_frontend::ui::render_app;
 
+use alice_frontend::util::runtime_log::runtime_log;
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    runtime_log("main", "system.start", "phase=frontend.main.start");
+
     // 启动 Python 后端
-    let bridge_client = BridgeClient::spawn_default()?;
+    runtime_log("main", "system.start", "phase=backend.spawn.request");
+    let bridge_client = match BridgeClient::spawn_default() {
+        Ok(client) => {
+            runtime_log("main", "system.start", "phase=backend.spawn.connected");
+            client
+        }
+        Err(err) => {
+            runtime_log(
+                "main",
+                "bridge.error",
+                &format!("phase=backend.spawn error={}", err),
+            );
+            return Err(err.into());
+        }
+    };
 
     // 初始化事件总线
     let event_bus = EventBus::new();
@@ -54,29 +72,75 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut dispatcher = EventDispatcher::new(event_bus);
 
     // 初始化终端
-    enable_raw_mode()?;
+    runtime_log("main", "system.start", "phase=raw_mode.init.start");
+    enable_raw_mode().map_err(|err| {
+        runtime_log(
+            "main",
+            "bridge.error",
+            &format!("phase=raw_mode.init error={}", err),
+        );
+        err
+    })?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture).map_err(|err| {
+        runtime_log(
+            "main",
+            "bridge.error",
+            &format!("phase=terminal.enter_alternate_screen error={}", err),
+        );
+        err
+    })?;
     let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
+    let mut terminal = Terminal::new(backend).map_err(|err| {
+        runtime_log("main", "bridge.error", &format!("phase=terminal.new error={}", err));
+        err
+    })?;
+    runtime_log("main", "system.start", "phase=raw_mode.init.ready");
 
     let tick_rate = Duration::from_millis(100);
     let mut last_tick = Instant::now();
+    let mut exit_reason = "unknown";
 
     // 主事件循环
     loop {
         // 处理来自后端的消息
         if !drain_bridge_messages(&mut app, &mut dispatcher) {
+            exit_reason = "bridge_message_channel_closed";
+            runtime_log(
+                "main",
+                "bridge.eof",
+                "phase=event_loop.bridge_messages reason=channel_closed",
+            );
             break;
         }
 
         // 处理来自后端的错误
         while let Some(err) = app.bridge_client.try_recv_error() {
-            dispatcher.handle_bridge_error(&mut app, err);
+            if is_actionable_stderr_error(&err) {
+                runtime_log(
+                    "main",
+                    "bridge.error",
+                    &format!("phase=event_loop.backend_error summary={}", err),
+                );
+                dispatcher.handle_bridge_error(&mut app, err);
+            } else {
+                runtime_log(
+                    "main",
+                    "bridge.stderr",
+                    &format!("phase=event_loop.backend_stderr summary={}", err),
+                );
+            }
         }
 
         // 渲染 UI
-        terminal.draw(|f| render_app(f, &mut app))?;
+        terminal.draw(|f| render_app(f, &mut app)).map_err(|err| {
+            runtime_log(
+                "main",
+                "bridge.error",
+                &format!("phase=terminal.draw error={}", err),
+            );
+            err
+        })?;
         dispatcher.update_areas(
             app.area_bounds.chat_area,
             app.area_bounds.sidebar_area,
@@ -88,8 +152,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .checked_sub(last_tick.elapsed())
             .unwrap_or_else(|| Duration::from_secs(0));
 
-        if event::poll(timeout)? {
-            match event::read()? {
+        if event::poll(timeout).map_err(|err| {
+            runtime_log("main", "bridge.error", &format!("phase=event.poll error={}", err));
+            err
+        })? {
+            match event::read().map_err(|err| {
+                runtime_log("main", "bridge.error", &format!("phase=event.read error={}", err));
+                err
+            })? {
                 Event::Key(key) => {
                     dispatcher.handle_key_event(&mut app, key);
                 }
@@ -108,14 +178,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // 检查退出条件
         if app.should_quit {
+            exit_reason = "app_should_quit";
             break;
         }
     }
 
+    runtime_log(
+        "main",
+        "system.shutdown",
+        &format!("phase=frontend.main.exit reason={}", exit_reason),
+    );
+
     // 优雅退出
     drop(terminal);
-    disable_raw_mode()?;
-    execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture)?;
+    disable_raw_mode().map_err(|err| {
+        runtime_log(
+            "main",
+            "bridge.error",
+            &format!("phase=raw_mode.disable error={}", err),
+        );
+        err
+    })?;
+    execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture).map_err(|err| {
+        runtime_log(
+            "main",
+            "bridge.error",
+            &format!("phase=terminal.leave_alternate_screen error={}", err),
+        );
+        err
+    })?;
+    runtime_log("main", "system.shutdown", "phase=frontend.main.done");
 
     Ok(())
 }

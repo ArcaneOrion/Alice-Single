@@ -10,9 +10,77 @@ use ratatui::layout::Rect;
 
 use crate::app::state::{AgentStatus as AppAgentStatus, App};
 use crate::bridge::protocol::message::{BridgeMessage, StatusContent};
+use crate::util::runtime_log::runtime_log;
 
 use super::event::{AppEvent, EventBus};
 use super::handler::{KeyAction, KeyboardHandler, MouseAction, MouseHandler};
+
+/// Strip ANSI escape sequences from a string.
+fn strip_ansi_codes(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\x1b' {
+            if chars.peek() == Some(&'[') {
+                chars.next(); // consume '['
+                // consume parameter bytes (0x30-0x3f)
+                while let Some(&c) = chars.peek() {
+                    if ('\x30'..='\x3f').contains(&c) {
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                // consume intermediate bytes (0x20-0x2f)
+                while let Some(&c) = chars.peek() {
+                    if ('\x20'..='\x2f').contains(&c) {
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                // consume final byte (0x40-0x7e)
+                if let Some(&c) = chars.peek() {
+                    if ('\x40'..='\x7e').contains(&c) {
+                        chars.next();
+                    }
+                }
+            }
+        } else {
+            result.push(ch);
+        }
+    }
+    result
+}
+
+/// Determine if a stderr line represents an actionable error that should be
+/// surfaced to the user in the TUI.
+///
+/// - Python log-format lines (starting with `YYYY-MM-DD`): only ERROR/CRITICAL/Traceback
+/// - Non-Python-log stderr content: treated as actionable
+pub fn is_actionable_stderr_error(line: &str) -> bool {
+    let stripped = strip_ansi_codes(line);
+    let trimmed = stripped.trim();
+
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    // Check if it looks like a Python log line: starts with YYYY-MM-DD timestamp
+    if trimmed.len() >= 10
+        && trimmed.as_bytes()[4] == b'-'
+        && trimmed.as_bytes()[7] == b'-'
+        && trimmed[..4].chars().all(|c| c.is_ascii_digit())
+    {
+        // It's a Python log line — only actionable if ERROR/CRITICAL/Traceback
+        return trimmed.contains("[ERROR]")
+            || trimmed.contains("[CRITICAL]")
+            || trimmed.contains("Traceback");
+    }
+
+    // Non-Python-log stderr content (e.g. direct print to stderr) is always actionable
+    true
+}
 
 /// 应用状态枚举
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -282,7 +350,7 @@ impl EventDispatcher {
         app.add_error(err.clone());
         app.set_idle();
         self.set_state(AppState::Idle);
-        eprintln!("Backend error: {}", err);
+        runtime_log("dispatcher", "bridge.error", &format!("summary={}", err));
     }
 
     /// 处理键盘事件

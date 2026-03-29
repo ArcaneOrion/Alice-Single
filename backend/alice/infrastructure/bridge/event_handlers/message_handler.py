@@ -5,15 +5,43 @@ Message Handler
 """
 
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
-from ..protocol.messages import INTERRUPT_SIGNAL, OutputMessage
+from ..protocol.messages import INTERRUPT_SIGNAL
 
 if TYPE_CHECKING:
     from ..server import BridgeServer
 
 
 logger = logging.getLogger(__name__)
+
+
+def _handler_log_extra(
+    event_type: str,
+    *,
+    data: Optional[dict[str, Any]] = None,
+    error: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """构造 MessageHandler 结构化日志字段。"""
+    payload: dict[str, Any] = {
+        "event_type": event_type,
+        "log_category": "bridge.message_handler",
+        "context": {
+            "component": "bridge_message_handler",
+        },
+        "data": data or {},
+    }
+    if error is not None:
+        payload["error"] = error
+    return payload
+
+
+def _summarize_text(text: str, limit: int = 120) -> str:
+    """生成可观测日志摘要。"""
+    cleaned = text.replace("\n", "\\n")
+    if len(cleaned) <= limit:
+        return cleaned
+    return f"{cleaned[:limit]}..."
 
 
 class MessageHandler:
@@ -40,7 +68,18 @@ class MessageHandler:
         if not user_input or user_input == INTERRUPT_SIGNAL:
             return
 
-        logger.info(f"收到 TUI 输入: {user_input[:100]}{'...' if len(user_input) > 100 else ''}")
+        logger.info(
+            "TUI input received",
+            extra=_handler_log_extra(
+                "bridge.message_received",
+                data={
+                    "direction": "frontend->backend",
+                    "message_type": "user_input",
+                    "message_length": len(user_input),
+                    "message_summary": _summarize_text(user_input),
+                },
+            ),
+        )
 
         # 通知状态变更
         self.server.send_status("thinking")
@@ -48,7 +87,17 @@ class MessageHandler:
         # 获取 Agent 实例
         agent = self.server.agent
         if agent is None:
-            logger.error("Agent 未初始化")
+            logger.error(
+                "Agent not initialized",
+                extra=_handler_log_extra(
+                    "bridge.error",
+                    data={"phase": "handle_input"},
+                    error={
+                        "type": "RuntimeError",
+                        "message": "Agent not initialized",
+                    },
+                ),
+            )
             self.server.send_error("Agent not initialized")
             return
 
@@ -61,7 +110,21 @@ class MessageHandler:
             self._process_response_loop(agent)
 
         except Exception as e:
-            logger.error(f"处理用户输入时出错: {e}", exc_info=True)
+            logger.error(
+                "Error while processing user input",
+                exc_info=True,
+                extra=_handler_log_extra(
+                    "bridge.error",
+                    data={
+                        "phase": "handle_input",
+                        "input_length": len(user_input),
+                    },
+                    error={
+                        "type": type(e).__name__,
+                        "message": str(e),
+                    },
+                ),
+            )
             self.server.send_error(f"Error processing input: {str(e)}")
         finally:
             self._processing = False
@@ -77,7 +140,13 @@ class MessageHandler:
         while True:
             # 检查中断状态
             if agent.interrupted:
-                logger.info("由于用户中断，跳过后续步骤。")
+                logger.info(
+                    "Interrupted before next response step",
+                    extra=_handler_log_extra(
+                        "bridge.interrupt",
+                        data={"phase": "response_loop.pre_llm"},
+                    ),
+                )
                 agent.interrupted = False
                 self.server.send_status("done")
                 break
@@ -100,14 +169,33 @@ class MessageHandler:
 
             # 检查中断状态
             if agent.interrupted:
-                logger.info("由于用户中断，跳过后续步骤。")
+                logger.info(
+                    "Interrupted after LLM response",
+                    extra=_handler_log_extra(
+                        "bridge.interrupt",
+                        data={"phase": "response_loop.post_llm"},
+                    ),
+                )
                 agent.interrupted = False
                 self.server.send_status("done")
                 break
 
             if not tool_calls:
                 # 无工具调用，结束对话
-                logger.info("回复完成，未检测到工具调用。")
+                logger.info(
+                    "Model output returned without tool calls",
+                    extra=_handler_log_extra(
+                        "bridge.message_sent",
+                        data={
+                            "direction": "backend->frontend",
+                            "message_type": "model_output",
+                            "content_length": len(full_content),
+                            "thinking_length": len(thinking_content),
+                            "message_summary": _summarize_text(full_content),
+                            "tool_calls_detected": 0,
+                        },
+                    ),
+                )
                 agent.messages.append({"role": "assistant", "content": full_content})
                 self.server.send_status("done")
                 break
@@ -119,7 +207,13 @@ class MessageHandler:
             feedback = self._execute_tool_calls(agent, tool_calls)
 
             if agent.interrupted:
-                logger.info("工具执行阶段被中断。")
+                logger.info(
+                    "Interrupted during tool execution",
+                    extra=_handler_log_extra(
+                        "bridge.interrupt",
+                        data={"phase": "tool_execution"},
+                    ),
+                )
                 agent.interrupted = False
                 self.server.send_status("done")
                 break
@@ -161,7 +255,13 @@ class MessageHandler:
             while self.server.transport.has_pending_input():
                 msg = self.server.transport.get_input(block=False)
                 if msg == INTERRUPT_SIGNAL:
-                    logger.info("检测到中断信号，正在停止输出...")
+                    logger.info(
+                        "Interrupt signal detected while streaming",
+                        extra=_handler_log_extra(
+                            "bridge.interrupt",
+                            data={"phase": "llm_streaming"},
+                        ),
+                    )
                     agent.interrupted = True
 
             if agent.interrupted:
@@ -221,13 +321,43 @@ class MessageHandler:
         # 强制冲刷管理器缓冲区
         final_msgs = stream_mgr.flush()
         if final_msgs:
-            logger.info(f"强制冲刷 StreamManager 缓冲区: {final_msgs}")
+            logger.info(
+                "StreamManager flush completed",
+                extra=_handler_log_extra(
+                    "bridge.message_sent",
+                    data={
+                        "direction": "backend->frontend",
+                        "message_type": "stream_flush",
+                        "chunk_count": len(final_msgs),
+                    },
+                ),
+            )
             for msg in final_msgs:
                 self.server.send_raw_message(msg)
 
         if agent.interrupted:
+            logger.info(
+                "LLM request interrupted before completion",
+                extra=_handler_log_extra(
+                    "bridge.interrupt",
+                    data={"phase": "llm_request"},
+                ),
+            )
             return None
 
+        logger.info(
+            "LLM request completed",
+            extra=_handler_log_extra(
+                "bridge.message_sent",
+                data={
+                    "direction": "backend->frontend",
+                    "message_type": "model_output",
+                    "content_length": len(full_content),
+                    "thinking_length": len(thinking_content),
+                    "message_summary": _summarize_text(full_content),
+                },
+            ),
+        )
         return full_content, thinking_content
 
     def _detect_tool_calls(self, content: str) -> dict[str, list[str]]:

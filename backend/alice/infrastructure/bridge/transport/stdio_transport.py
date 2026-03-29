@@ -10,7 +10,7 @@ import logging
 import queue
 import sys
 import threading
-from typing import Optional, Callable
+from typing import Any, Optional
 
 from .transport_trait import (
     TransportProtocol,
@@ -21,6 +21,34 @@ from .transport_trait import (
 from ..protocol.messages import OutputMessage, INTERRUPT_SIGNAL
 
 logger = logging.getLogger(__name__)
+
+
+def _transport_log_extra(
+    event_type: str,
+    *,
+    data: Optional[dict[str, Any]] = None,
+    error: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """构造 stdio transport 结构化日志字段。"""
+    payload: dict[str, Any] = {
+        "event_type": event_type,
+        "log_category": "bridge.transport.stdio",
+        "context": {
+            "component": "bridge_stdio_transport",
+        },
+        "data": data or {},
+    }
+    if error is not None:
+        payload["error"] = error
+    return payload
+
+
+def _summarize_text(text: str, limit: int = 120) -> str:
+    """生成日志摘要，避免打印完整输入。"""
+    cleaned = text.replace("\n", "\\n")
+    if len(cleaned) <= limit:
+        return cleaned
+    return f"{cleaned[:limit]}..."
 
 
 class StdioTransport(TransportProtocol):
@@ -67,7 +95,13 @@ class StdioTransport(TransportProtocol):
     def start(self) -> None:
         """启动传输层，创建异步读取线程。"""
         if self._running:
-            logger.warning("StdioTransport already running")
+            logger.warning(
+                "StdioTransport already running",
+                extra=_transport_log_extra(
+                    "system.start",
+                    data={"phase": "transport.start", "reason": "already_running"},
+                ),
+            )
             return
 
         self._running = True
@@ -77,7 +111,16 @@ class StdioTransport(TransportProtocol):
             name="StdioReader"
         )
         self._reader_thread.start()
-        logger.info("StdioTransport started")
+        logger.info(
+            "StdioTransport started",
+            extra=_transport_log_extra(
+                "system.start",
+                data={
+                    "phase": "transport.start",
+                    "reader_thread": self._reader_thread.name,
+                },
+            ),
+        )
 
     def stop(self) -> None:
         """停止传输层。"""
@@ -88,7 +131,13 @@ class StdioTransport(TransportProtocol):
         if self._reader_thread and self._reader_thread.is_alive():
             # 等待线程结束（最多 1 秒）
             self._reader_thread.join(timeout=1.0)
-        logger.info("StdioTransport stopped")
+        logger.info(
+            "StdioTransport stopped",
+            extra=_transport_log_extra(
+                "system.shutdown",
+                data={"phase": "transport.stop"},
+            ),
+        )
 
     def send_message(self, message: OutputMessage) -> None:
         """
@@ -112,7 +161,32 @@ class StdioTransport(TransportProtocol):
         """
         try:
             print(data, flush=True, file=self._stdout)
+            logger.info(
+                "stdout write success",
+                extra=_transport_log_extra(
+                    "bridge.message_sent",
+                    data={
+                        "direction": "backend->frontend",
+                        "payload_length": len(data),
+                        "message_summary": _summarize_text(data),
+                    },
+                ),
+            )
         except Exception as e:
+            logger.error(
+                "stdout write failed",
+                extra=_transport_log_extra(
+                    "bridge.error",
+                    data={
+                        "phase": "stdout.write",
+                        "payload_length": len(data),
+                    },
+                    error={
+                        "type": type(e).__name__,
+                        "message": str(e),
+                    },
+                ),
+            )
             raise TransportError(f"Failed to write to stdout: {e}") from e
 
     def set_message_callback(self, callback: Optional[MessageCallback]) -> None:
@@ -180,14 +254,29 @@ class StdioTransport(TransportProtocol):
 
         持续读取 stdin 并将输入放入队列。
         """
-        logger.debug("stdin reader thread started")
+        logger.info(
+            "stdin reader thread started",
+            extra=_transport_log_extra(
+                "system.start",
+                data={"phase": "stdin_reader.start"},
+            ),
+        )
 
         while self._running:
             try:
                 line = self._stdin.readline()
                 if not line:
                     # EOF
-                    logger.info("stdin EOF received")
+                    logger.info(
+                        "stdin EOF received",
+                        extra=_transport_log_extra(
+                            "bridge.eof",
+                            data={
+                                "phase": "stdin_reader.read",
+                                "source": "stdin",
+                            },
+                        ),
+                    )
                     self._input_queue.put(None)
                     if self._eof_callback:
                         self._eof_callback()
@@ -195,22 +284,67 @@ class StdioTransport(TransportProtocol):
 
                 stripped = line.strip()
                 self._input_queue.put(stripped)
+                logger.info(
+                    "stdin message received",
+                    extra=_transport_log_extra(
+                        "bridge.message_received",
+                        data={
+                            "direction": "frontend->backend",
+                            "message_type": (
+                                "interrupt" if stripped == INTERRUPT_SIGNAL else "user_input"
+                            ),
+                            "message_length": len(stripped),
+                            "message_summary": _summarize_text(stripped),
+                        },
+                    ),
+                )
 
                 # 调用消息回调
                 if self._message_callback and stripped:
                     try:
                         self._message_callback(stripped)
                     except Exception as e:
-                        logger.error(f"Error in message callback: {e}", exc_info=True)
+                        logger.error(
+                            "Error in message callback",
+                            exc_info=True,
+                            extra=_transport_log_extra(
+                                "bridge.error",
+                                data={
+                                    "phase": "stdin_reader.callback",
+                                    "message_length": len(stripped),
+                                },
+                                error={
+                                    "type": type(e).__name__,
+                                    "message": str(e),
+                                },
+                            ),
+                        )
 
             except Exception as e:
-                logger.error(f"Error reading stdin: {e}", exc_info=True)
+                logger.error(
+                    "Error reading stdin",
+                    exc_info=True,
+                    extra=_transport_log_extra(
+                        "bridge.error",
+                        data={"phase": "stdin_reader.read"},
+                        error={
+                            "type": type(e).__name__,
+                            "message": str(e),
+                        },
+                    ),
+                )
                 self._input_queue.put(None)
                 if self._eof_callback:
                     self._eof_callback()
                 break
 
-        logger.debug("stdin reader thread stopped")
+        logger.info(
+            "stdin reader thread stopped",
+            extra=_transport_log_extra(
+                "system.shutdown",
+                data={"phase": "stdin_reader.stop"},
+            ),
+        )
 
 
 __all__ = [
