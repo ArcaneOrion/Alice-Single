@@ -67,8 +67,9 @@ def configure_legacy_logging(
     file_handler.setFormatter(formatter)
     root_logger.addHandler(file_handler)
 
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(getattr(logging, config.level.upper(), logging.INFO))
+    # 桥接模式下 stdout 是 JSON 协议通道，日志只能走 stderr
+    console_handler = logging.StreamHandler(sys.stderr)
+    console_handler.setLevel(getattr(logging, config.console_level.upper(), getattr(logging, config.level.upper(), logging.INFO)))
     console_handler.setFormatter(formatter)
     root_logger.addHandler(console_handler)
 

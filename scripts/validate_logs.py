@@ -9,6 +9,9 @@ from pathlib import Path
 from typing import Iterable
 
 REQUIRED_FIELDS = ("ts", "event_type", "level", "source")
+FULL_PAYLOAD_MODE = "full_payload"
+LLM_EVENT_PREFIX = "llm_"
+CONTEXT_IDENTIFIERS = ("task_id", "request_id", "trace_id")
 
 
 def iter_jsonl_records(path: Path) -> Iterable[tuple[int, dict[str, object]] | tuple[int, str]]:
@@ -31,6 +34,51 @@ def check_record(record: dict[str, object]) -> list[str]:
     for field in REQUIRED_FIELDS:
         if field not in record:
             failures.append(f"missing field {field}")
+
+    context = record.get("context")
+    if context is not None and not isinstance(context, dict):
+        failures.append("context must be an object")
+
+    data = record.get("data")
+    if data is not None and not isinstance(data, dict):
+        failures.append("data must be an object")
+
+    error = record.get("error")
+    if error is not None and not isinstance(error, (dict, str)):
+        failures.append("error must be a string or object")
+
+    event_type = record.get("event_type", "")
+    if event_type.startswith(LLM_EVENT_PREFIX):
+        if not isinstance(context, dict):
+            failures.append("llm event context should be an object containing task_id/request_id/trace_id")
+        elif not any(key in context for key in CONTEXT_IDENTIFIERS):
+            failures.append("llm event context should contain task_id/request_id/trace_id")
+
+    if (
+        isinstance(data, dict)
+        and data.get("mode") == FULL_PAYLOAD_MODE
+    ):
+        payload = data.get("payload")
+        if not isinstance(payload, dict):
+            failures.append("full payload mode requires a payload object")
+            return failures
+
+        metadata = payload.get("metadata")
+        length = None
+        if not isinstance(metadata, dict):
+            failures.append("full payload payload.metadata must be an object")
+        else:
+            length = metadata.get("length")
+            if length is None or not isinstance(length, int):
+                failures.append("full payload metadata.length should be an integer")
+            else:
+                length = int(length)
+        content = payload.get("content")
+        if isinstance(content, str) and isinstance(length, int):
+            if len(content) > length:
+                failures.append(
+                    "full payload content length exceeds reported metadata.length"
+                )
     return failures
 
 

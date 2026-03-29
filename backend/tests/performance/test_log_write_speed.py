@@ -50,18 +50,42 @@ def test_log_write_throughput(tmp_path: Path) -> None:
         )
     elapsed = time.perf_counter() - start
 
-    handler.flush()
-    handler.close()
-    logger.removeHandler(handler)
-
     assert elapsed > 0, "Elapsed time must be measurable"
 
     throughput = total_messages / elapsed
     assert throughput > 1000, f"Expected throughput > 1000 events/sec, got {throughput:.2f}"
 
+    large_payload = "X" * 4096
+    logger.info(
+        "full payload verification",
+        extra={
+            "event_type": "task.progress",
+            "log_category": "tasks",
+            "task_id": "perf-full-payload",
+            "context": {"trace_id": "payload-trace"},
+            "data": {
+                "mode": "full_payload",
+                "payload": {
+                    "content": large_payload,
+                    "metadata": {"length": len(large_payload)},
+                },
+            },
+        },
+    )
+
+    handler.flush()
+    handler.close()
+    logger.removeHandler(handler)
+
     tasks_file = tmp_path / "tasks.jsonl"
     records = _read_jsonl(tasks_file)
-    assert len(records) == total_messages
+    assert len(records) == total_messages + 1
     for record in records:
         _assert_required_fields(record)
         assert record.get("task_id") is not None
+
+    last_record = records[-1]
+    assert last_record["task_id"] == "perf-full-payload"
+    assert last_record["context"]["trace_id"] == "payload-trace"
+    assert last_record["data"]["mode"] == "full_payload"
+    assert last_record["data"]["payload"]["metadata"]["length"] == len(large_payload)

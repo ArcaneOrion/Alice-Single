@@ -9,6 +9,7 @@ from .adapter import (
     bind_log_context,
     get_log_context,
     get_structured_logger,
+    normalize_event_type,
     reset_log_context,
 )
 from .configure import configure_logging, get_logger
@@ -19,7 +20,7 @@ from .formatters import (
     DetailedFormatter,
     MarkdownFormatter,
 )
-from .jsonl_formatter import JSONLFormatter
+from .jsonl_formatter import JSONLFormatter, sanitize_log_payload
 from .jsonl_logger import (
     JSONLCategoryFileHandler,
     NoopRotationStrategy,
@@ -34,11 +35,13 @@ __all__ = [
     "get_logger",
     "StructuredLogger",
     "get_structured_logger",
+    "normalize_event_type",
     "bind_log_context",
     "get_log_context",
     "reset_log_context",
     "JSONFormatter",
     "JSONLFormatter",
+    "sanitize_log_payload",
     "CompactFormatter",
     "DetailedFormatter",
     "MarkdownFormatter",

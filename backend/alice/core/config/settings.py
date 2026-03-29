@@ -50,6 +50,7 @@ class DockerConfig:
 class LoggingConfig:
     """日志配置"""
     level: str = "INFO"
+    console_level: str = "INFO"
     format: str = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
     file: str = "alice_runtime.log"
     enable_colors: bool = True
@@ -62,6 +63,13 @@ class LoggingConfig:
     tasks_log_file: str = "tasks.jsonl"
     changes_log_file: str = "changes.jsonl"
     schema_file: str = "schema_version.json"
+    payload_depth: int = -1
+    redaction_policy: str = "minimal"
+    capture_thinking: bool = True
+    capture_api_headers: bool = True
+    capture_api_bodies: bool = True
+    capture_tool_io: bool = True
+    max_field_length: int = 0
 
 
 @dataclass

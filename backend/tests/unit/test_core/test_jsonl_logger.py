@@ -101,6 +101,72 @@ def test_formatter_captures_error_from_exc_info() -> None:
     assert "RuntimeError" in str(payload["error"])
 
 
+def test_formatter_serializes_full_payload_fields() -> None:
+    class CustomObject:
+        def __str__(self) -> str:
+            return "<custom-object>"
+
+    formatter = JSONLFormatter()
+    record = _build_record(
+        "full payload event",
+        event_type="task.progress",
+        log_category="tasks",
+        context={
+            "trace_id": "trace-123",
+            "component": "serializer",
+        },
+        data={
+            "operation": "payload_stream",
+            "payload": {
+                "content": "nested",
+                "metadata": {"depth": 5},
+                "object": CustomObject(),
+            },
+        },
+        task_id="task-full-payload",
+        error={"message": "edge case\nnewline", "code": 500},
+    )
+
+    payload = json.loads(formatter.format(record))
+    assert payload["context"]["component"] == "serializer"
+    assert payload["data"]["payload"]["metadata"]["depth"] == 5
+    assert payload["data"]["payload"]["object"] == "<custom-object>"
+    assert payload["task_id"] == "task-full-payload"
+    assert payload["error"]["code"] == 500
+
+
+def test_handler_escapes_newlines_and_writes_full_payload(tmp_path: Path) -> None:
+    handler = JSONLCategoryFileHandler(log_dir=tmp_path)
+    logger = _new_test_logger()
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+
+    logger.info(
+        "payload begin\npayload end",
+        extra={
+            "event_type": "task.progress",
+            "log_category": "tasks",
+            "task_id": "task-payload-1",
+            "context": {"session_id": "session-2"},
+            "data": {"payload": {"content": "a\nb\nc", "size": 3}},
+        },
+    )
+
+    handler.flush()
+    handler.close()
+    logger.removeHandler(handler)
+
+    records = _read_jsonl(tmp_path / "tasks.jsonl")
+    assert len(records) == 1
+    record = records[0]
+    assert record["message"] == "payload begin\npayload end"
+    assert record["context"]["session_id"] == "session-2"
+    assert record["data"]["payload"]["content"] == "a\nb\nc"
+
+    raw_lines = (tmp_path / "tasks.jsonl").read_text(encoding="utf-8").splitlines()
+    assert any("\\n" in line for line in raw_lines), "Handler should sanitize newline characters"
+
+
 def test_handler_routes_records_by_log_category_and_initializes_directory(tmp_path: Path) -> None:
     log_dir = tmp_path / "nested" / "logs"
     handler = JSONLCategoryFileHandler(log_dir=log_dir)
@@ -182,4 +248,3 @@ def test_handler_thread_safe_append_without_line_loss(tmp_path: Path) -> None:
 
     records = _read_jsonl(log_dir / "tasks.jsonl")
     assert len(records) == thread_count * logs_per_thread
-

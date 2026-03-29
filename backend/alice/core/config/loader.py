@@ -129,6 +129,13 @@ class ConfigLoader:
             tasks_log_file=data.get("tasks_log_file", "tasks.jsonl"),
             changes_log_file=data.get("changes_log_file", "changes.jsonl"),
             schema_file=data.get("schema_file", "schema_version.json"),
+            payload_depth=data.get("payload_depth", -1),
+            redaction_policy=data.get("redaction_policy", "minimal"),
+            capture_thinking=data.get("capture_thinking", True),
+            capture_api_headers=data.get("capture_api_headers", True),
+            capture_api_bodies=data.get("capture_api_bodies", True),
+            capture_tool_io=data.get("capture_tool_io", True),
+            max_field_length=data.get("max_field_length", 0),
         )
 
     def _apply_env_vars(self, settings: Settings) -> None:
@@ -149,14 +156,32 @@ class ConfigLoader:
         if log_level := os.getenv("LOG_LEVEL"):
             settings.logging.level = log_level
         if structured := os.getenv("LOG_ENABLE_STRUCTURED"):
-            settings.logging.enable_structured = structured.lower() in {"1", "true", "yes", "on"}
+            settings.logging.enable_structured = self._parse_bool(structured)
         if dual_write := os.getenv("LOG_DUAL_WRITE_LEGACY"):
-            settings.logging.dual_write_legacy = dual_write.lower() in {"1", "true", "yes", "on"}
+            settings.logging.dual_write_legacy = self._parse_bool(dual_write)
         if logs_dir := os.getenv("LOGS_DIR"):
             settings.logging.logs_dir = logs_dir
+        if payload_depth := os.getenv("LOG_PAYLOAD_DEPTH"):
+            settings.logging.payload_depth = int(payload_depth)
+        if redaction_policy := os.getenv("LOG_REDACTION_POLICY"):
+            settings.logging.redaction_policy = redaction_policy
+        if capture_thinking := os.getenv("LOG_CAPTURE_THINKING"):
+            settings.logging.capture_thinking = self._parse_bool(capture_thinking)
+        if capture_api_headers := os.getenv("LOG_CAPTURE_API_HEADERS"):
+            settings.logging.capture_api_headers = self._parse_bool(capture_api_headers)
+        if capture_api_bodies := os.getenv("LOG_CAPTURE_API_BODIES"):
+            settings.logging.capture_api_bodies = self._parse_bool(capture_api_bodies)
+        if capture_tool_io := os.getenv("LOG_CAPTURE_TOOL_IO"):
+            settings.logging.capture_tool_io = self._parse_bool(capture_tool_io)
+        if max_field_length := os.getenv("LOG_MAX_FIELD_LENGTH"):
+            settings.logging.max_field_length = int(max_field_length)
         if legacy_mode := os.getenv("USE_LEGACY_LOGGING"):
-            use_legacy = legacy_mode.lower() in {"1", "true", "yes", "on"}
+            use_legacy = self._parse_bool(legacy_mode)
             settings.logging.enable_structured = not use_legacy
+
+    @staticmethod
+    def _parse_bool(value: str) -> bool:
+        return value.lower() in {"1", "true", "yes", "on"}
 
     @staticmethod
     def expand_env_vars(value: str) -> str:

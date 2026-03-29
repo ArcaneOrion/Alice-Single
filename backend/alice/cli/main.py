@@ -99,6 +99,7 @@ class TUIBridge:
 
             load_dotenv()
             settings = load_config()
+            settings.logging.console_level = "ERROR"
             configure_logging(settings.logging)
 
             api_key = os.getenv("API_KEY", "")

@@ -92,6 +92,38 @@ class TestLoggingSchema(unittest.TestCase):
                 for field in required:
                     self.assertIn(field, record)
 
+    def test_field_definitions_include_payload_fields(self) -> None:
+        """field_definitions 应包含 payload 相关字段（task_id/span_id/context/data/error）。"""
+        definitions = self.schema.get("field_definitions", {})
+        expected_types = {
+            "task_id": "string",
+            "span_id": "string",
+            "context": "object",
+            "data": "object",
+            "error": "object",
+        }
+        for field, expected_type in expected_types.items():
+            self.assertIn(field, definitions, f"{field} should be defined in field_definitions")
+            definition = definitions[field]
+            self.assertEqual(
+                definition.get("type"),
+                expected_type,
+                f"{field} definition should describe type {expected_type}",
+            )
+
+    def test_examples_show_context_and_data_usage(self) -> None:
+        """示例记录里应至少出现一次 context 和 data，展示完整载荷模式。"""
+        examples = self.schema.get("example_records", {})
+        has_context = False
+        has_data = False
+        for records in examples.values():
+            for record in records:
+                has_context = has_context or ("context" in record)
+                has_data = has_data or ("data" in record)
+
+        self.assertTrue(has_context, "At least one example record should include context")
+        self.assertTrue(has_data, "At least one example record should include data")
+
 
 if __name__ == "__main__":
     unittest.main()
