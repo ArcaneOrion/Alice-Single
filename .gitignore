@@ -15,7 +15,7 @@ memory/
 *.log
 /target/
 frontend/target/
-.claude/settings.local.json
+.claude/
 .venv/
 .pytest_cache/
 .mypy_cache/

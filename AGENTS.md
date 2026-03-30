@@ -1,64 +1,96 @@
-# Agent 执行手册
+# AGENTS.md
 
-## 仓库定位
-本仓库是一个 **Rust TUI frontend + Python backend engine + bridge protocol + Docker sandbox** 系统。
-默认工作原则：保持分层边界，保持跨语言协议同步，把运行时状态视为本地产物而不是设计文档。
+## 1. 这个文件的角色
+把这份文件当作目录，不要当作百科全书。
 
-## 优先阅读
-在做结构性改动、跨模块改动或协议改动前，先看这些文件：
+- `AGENTS.md` 只保留稳定导航、改动边界、耦合提醒、最小操作约束。
+- 更深层知识应写入 `docs/`，并在这里给出入口。
+- 如果发现旧导航仍指向根目录历史文档，优先收敛到 `docs/` 的专题入口，而不是在这里补充长期知识。
 
-- `CODE_MAP.md`：最快的代码地图，适合先判断改动边界和耦合点
-- `ARCHITECTURE.md`：分层职责和依赖方向
-- `API.md`：bridge protocol 与 DTO contract
-- `README.md`：启动流程、memory model、内置命令
-- `backend/tests/README.md`：测试布局与 marker 约定
+## 2. 先看哪里
+开始任何结构性、跨模块、跨语言改动前，先定位到对应文档：
 
-## Repo Map
-- `backend/alice/`：Python backend，按 `application/`、`domain/`、`infrastructure/`、`core/` 分层
-- `frontend/src/`：Rust frontend，按 `app/`、`bridge/`、`core/`、`ui/`、`util/` 组织
-- `backend/tests/`：后端测试，包含 `unit/`、`integration/`、`performance/`，共享夹具在 `fixtures/`
-- `protocols/`：共享协议与 schema；bridge 相关改动通常会触达这里
-- `prompts/`：人格与提示词资产
-- `skills/`：内置技能定义与相关资源
-- `docs/`：迁移、日志、验证与补充工程文档
-- `.alice/`、`alice_output/`、日志、memory 类运行时文件：本地运行产物，不是 source of truth
+- 文档总入口：`docs/README.md`
+- 仓库地图：`docs/reference/code-map.md`
+- 架构边界与依赖方向：`docs/architecture/overview.md`
+- Bridge 协议语义：`docs/protocols/bridge.md`
+- Bridge 线级 contract：`protocols/bridge_schema.json`
+- 启动方式、运行入口、用户侧行为：`README.md`
+- 测试指南：`docs/testing/guide.md`
+- 结构化日志专题：`docs/operations/logging/README.md`
 
-## 架构约束
-- 后端代码应保持在既有分层模型内：
-  `application` 负责 workflow / use case orchestration，
-  `domain` 负责核心业务能力，
-  `infrastructure` 负责适配器与外部集成，
-  `core` 负责共享框架能力。
-- 不要为了方便跨层直连。新增代码应遵守现有依赖方向，而不是绕过层次边界。
-- 优先扩展现有子包，不要随意新增顶层目录或新的“杂项模块”。
-- 前端改动应留在现有模块边界内：
-  `app` 管状态与消息流，
-  `bridge` 管后端通信，
-  `core` 管 dispatcher / event / input handler，
-  `ui` 管渲染与组件。
-- 不要继续把逻辑堆进 `frontend/src/main.rs`；该文件应保持为组合与启动入口。
+规则：需要细节时，进入这些权威来源；不要把主题知识再抄回 `AGENTS.md`。
 
-## 高耦合区域
-- **Bridge protocol 是双端契约。** 只要修改消息结构、字段语义或状态流转，就必须同步更新 Rust 和 Python 两端实现。
-- Bridge 相关改动通常至少涉及：
-  `frontend/src/bridge/protocol/`
-  `frontend/src/bridge/transport/`
-  `backend/alice/infrastructure/bridge/protocol/`
-  `backend/alice/infrastructure/bridge/transport/`
-  `protocols/bridge_schema.json`
-- Structured logging 也是横切关注点。修改日志 schema、字段命名或校验流程前，先看 `docs/` 中相关说明。
-- 运行时状态目录和文件是 operational data，不要把它们当作权威架构说明。
+## 3. 知识库约定
+仓库知识库以 `docs/` 为统一入口。
 
-## 构建与测试
-后端使用 **Python 3.11+**，前端使用 **Rust/Cargo**。
+- `AGENTS.md` 负责告诉你去哪里找知识。
+- `docs/` 负责沉淀专题知识、迁移说明、验证标准、运行约束。
+- `docs/reference/sources-of-truth.md` 定义“哪个主题看哪份文档”。
+- 如果本次任务产生新的长期知识，优先更新 `docs/`，而不是继续扩写 `AGENTS.md`。
+
+## 4. Repo Map
+- `frontend/`: Rust TUI frontend。主要代码在 `frontend/src/`。
+- `backend/alice/`: Python backend engine。
+- `protocols/`: 共享协议与 schema。
+- `prompts/`: 提示词与人格资产。
+- `skills/`: 内置技能与相关资源。
+- `docs/`: 结构化文档知识库。
+- `.alice/`、`memory/`、`alice_output/`、`*.log`、缓存、coverage、build 产物：本地运行数据，不是 source of truth。
+
+## 5. 模块边界
+后端保持既有分层，不要跨层偷连：
+
+- `application/`: workflow、use case orchestration
+- `domain/`: 核心业务能力
+- `infrastructure/`: bridge、docker、cache、logging 等适配器
+- `core/`: config、DI、interfaces、event bus、共享框架能力
+
+前端保持既有模块分工：
+
+- `app/`: 状态与消息流
+- `bridge/`: 后端通信、协议、传输
+- `core/`: dispatcher、event、input handler
+- `ui/`: 渲染与组件
+- `frontend/src/main.rs`: 仅做组合与启动入口，不继续堆业务逻辑
+
+优先扩展现有子包，不要随意新增顶层目录或新的 `misc` 式模块。
+
+## 6. 高耦合区域
+这些地方改动时，默认按“多文件联动”处理：
+
+- Bridge protocol 是双端契约。改消息结构、字段名、状态值、序列化格式时，要同步更新：
+  - `frontend/src/bridge/protocol/`
+  - `backend/alice/infrastructure/bridge/protocol/`
+  - `protocols/bridge_schema.json`
+  - `docs/protocols/bridge.md`
+- Bridge transport / control flow 改动通常还会触达：
+  - `frontend/src/bridge/client.rs`
+  - `frontend/src/bridge/transport/`
+  - `backend/alice/infrastructure/bridge/server.py`
+  - `backend/alice/infrastructure/bridge/transport/`
+  - `backend/alice/infrastructure/bridge/event_handlers/`
+- Frontend message/status 流改动通常还要检查：
+  - `frontend/src/app/state.rs`
+  - `frontend/src/core/dispatcher.rs`
+- Structured logging 属于横切关注点；改 schema、字段命名、路由或校验逻辑前，先读 `docs/operations/logging/README.md`。
+
+## 7. 构建与验证
+基础环境：
+
+- Python `>=3.11`
+- Rust toolchain：见 `frontend/Cargo.toml`
+
+常用命令：
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
+python -m venv .venv
+source .venv/bin/activate
 pip install -e 'backend[dev]'
 cd frontend && cargo run --release
 ```
 
-常用校验命令：
+最小验证集合：
 
 ```bash
 python -m pytest backend/tests
@@ -77,31 +109,21 @@ pytest -m integration
 pytest -m "not slow"
 ```
 
-## 编辑规则
-- Python 使用 4 空格缩进、`snake_case`、显式类型标注；新代码默认要满足 strict `mypy`。
-- Ruff 配置集中在 `backend/pyproject.toml`，导入顺序和 lint 行为应与现有配置一致。
-- Rust 遵循标准 `cargo fmt` 风格；模块/函数使用 `snake_case`，结构体/枚举使用 `CamelCase`。
-- 优先复用现有模块，再考虑新增文件；只有在边界清晰且有明确架构理由时才引入新抽象。
-- 修改 protocol、prompt、config 这类高影响文件时，保持改动最小化，并在总结或 PR 中明确标出。
+## 8. 编辑约束
+- Python: 4 空格缩进、`snake_case`、显式类型标注；新代码默认满足 strict `mypy`。
+- Rust: 遵循 `cargo fmt`；模块/函数 `snake_case`，结构体/枚举 `CamelCase`。
+- 优先复用现有模块，避免无边界的新抽象。
+- 修改 protocol、prompt、config、logging 这类高影响文件时，保持改动最小，并在总结中明确标出。
+- 如果任务引入新的长期知识或操作规则，把内容沉淀到 `docs/`，这里只保留入口。
 
-## 测试要求
-- 测试文件命名使用 `test_*.py`，测试类使用 `Test*`，测试函数使用 `test_*`。
-- 集成测试和慢测试要显式添加 `@pytest.mark.integration`、`@pytest.mark.slow`。
-- 后端功能改动通常优先补或更新 unit tests。
-- 如果改动影响 bridge communication、Docker execution、workflow orchestration 或其他跨子系统边界，补 integration coverage。
-- 如果改动影响吞吐、时延或重执行路径，检查是否需要更新 `backend/tests/performance/`。
+## 9. 测试与文档更新规则
+- 后端功能改动，优先补或更新 unit tests。
+- 影响 bridge、Docker execution、workflow orchestration、跨子系统边界时，补 integration coverage。
+- 影响日志 schema 或验证流程时，同步更新 `docs/` 与相关测试/脚本。
+- 如果发现导航文档与真实代码不一致，优先修正对应的 `docs/` 权威入口，不要靠 `AGENTS.md` 打补丁。
 
-## 安全与配置
-- 不要提交 `.env`、API keys、日志、运行时 memory/state 文件或其他本地产物。
+## 10. 安全与提交
+- 不要提交 `.env`、API keys、日志、memory/state 文件、缓存、coverage、构建产物。
 - 配置模板参考 `.env.example`；真实 secrets 只保存在本地 `.env`。
-- `memory/` 以及类似运行时状态目录默认视为本地 operational data，除非任务明确要求处理它们。
-
-## Commit 与 PR 约定
-- 提交信息遵循 **Conventional Commits**，例如 `feat: ...`、`fix: ...`、`refactor: ...`、`chore: ...`。
-- 单次提交尽量聚焦一个 feature、一个 layer 或一个连贯的 refactor。
-- PR 至少应说明：
-  改了什么，
-  关联 issue / task，
-  跑了哪些验证命令，
-  TUI 改动的截图或终端录屏，
-  以及 protocol / config / prompt 改动的单独说明。
+- Commit message 使用 Conventional Commits，例如 `feat:`、`fix:`、`refactor:`、`chore:`。
+- 单次提交尽量聚焦一个 feature、一个 layer 或一个连贯 refactor。

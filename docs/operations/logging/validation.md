@@ -3,7 +3,7 @@
 ## 1. 验证目的
 - 确保 `.alice/logs` 下的 `system.jsonl`、`tasks.jsonl`、`changes.jsonl` 均被 JSONL 结构化 logger 正常写入。
 - 保证每条记录至少含字段 `ts`、`event_type`、`level`、`source`，便于后续 schema 驱动处理。
-- 验证典型任务生命周期（创建 → 启动 → 进度 → 完成）可以通过 `task_id` 串联。
+- 验证典型任务生命周期（创建 -> 启动 -> 进度 -> 完成）可以通过 `task_id` 串联。
 
 ## 2. 执行步骤
 1. 运行集成测试：

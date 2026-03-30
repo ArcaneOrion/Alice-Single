@@ -58,9 +58,10 @@ Alice 采用 **五层分层架构** + **Rust TUI 前端**：
 
 ### 架构文档
 
-- **[ARCHITECTURE.md](ARCHITECTURE.md)** - 详细架构说明
-- **[API.md](API.md)** - API 接口文档
-- **[CLAUDE.md](CLAUDE.md)** - 开发指南
+- **[docs/README.md](docs/README.md)** - 文档总入口
+- **[docs/architecture/overview.md](docs/architecture/overview.md)** - 架构总览
+- **[docs/protocols/bridge.md](docs/protocols/bridge.md)** - Bridge 协议文档
+- **[CLAUDE.md](CLAUDE.md)** - 开发导航
 
 ---
 
@@ -82,7 +83,7 @@ Alice 采用 **五层分层架构** + **Rust TUI 前端**：
 
 #### 宿主机 (Host) 依赖
 1. **Docker**: 必须安装并启动
-2. **Python 3.8+**: 用于运行后端引擎
+2. **Python 3.11+**: 用于运行后端引擎
 3. **Rust 编译环境**: Cargo 工具链
 
 #### 容器 (Container) 依赖

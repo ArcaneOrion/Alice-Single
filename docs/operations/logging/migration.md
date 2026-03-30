@@ -97,7 +97,7 @@ logger.info(
 ```
 
 ## 5. 字段约定
-结构化字段以 `docs/logging_schema.md` 和 `.alice/logs/schema_version.json` 为准。
+结构化字段以 `schema.md` 和 `.alice/logs/schema_version.json` 为准。
 
 必需字段：
 
