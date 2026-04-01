@@ -15,6 +15,7 @@ from backend.alice.core.config import load_config
 from ..executors.docker_executor import DockerExecutor
 from ..models.execution_result import ExecutionResult, ExecutionStatus
 from ..models.tool_calling import ToolExecutionResult, ToolInvocation, ToolResultPayload
+from .tool_registry import ToolRegistry
 from ..builtin.memory_command import MemoryCommandHandler
 from ..builtin.todo_command import TodoCommandHandler
 from ..builtin.toolkit_command import ToolkitCommandHandler
@@ -196,6 +197,14 @@ class ExecutionService(_ExecutionServiceBase):
     统一的命令执行入口，处理内置命令拦截和容器执行路由
     """
 
+    def __init__(
+        self,
+        executor: Optional[DockerExecutor] = None,
+        snapshot_manager=None,
+        tool_registry=None,
+    ):
+        super().__init__(executor=executor, snapshot_manager=snapshot_manager)
+        self.tool_registry = tool_registry
 
     def _build_log_context(self, log_context: Optional[dict], phase: str) -> dict:
         """构建执行链路日志上下文。"""
@@ -459,7 +468,11 @@ class ExecutionService(_ExecutionServiceBase):
         log_context: Optional[dict] = None,
     ) -> ToolExecutionResult:
         """执行结构化工具调用。"""
-        payload = self._parse_tool_arguments(invocation.arguments)
+        registry = self.tool_registry
+        if registry is not None:
+            payload = registry.validate_tool_arguments(invocation.name, invocation.arguments)
+        else:
+            payload = self._parse_tool_arguments(invocation.arguments)
 
         if invocation.name == "run_bash":
             command = str(payload.get("command") or "")
@@ -472,6 +485,8 @@ class ExecutionService(_ExecutionServiceBase):
                 raise ValueError("run_python 缺少 code 参数")
             raw_result = self.execute(command, is_python_code=True, log_context=log_context)
         else:
+            if registry is not None:
+                registry.require_tool(invocation.name)
             raise ValueError(f"不支持的工具: {invocation.name}")
 
         return self._coerce_tool_result(invocation, raw_result)

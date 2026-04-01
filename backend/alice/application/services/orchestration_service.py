@@ -139,9 +139,12 @@ class OrchestrationService:
             work_dir=docker_config.container.work_dir,
         )
 
+        tool_registry = ToolRegistry(skill_registry)
+
         execution_service = ExecutionService(
             executor=docker_executor,
             snapshot_manager=None,  # 将在初始化后设置
+            tool_registry=tool_registry,
         )
 
         # 加载系统提示词
@@ -154,8 +157,6 @@ class OrchestrationService:
             max_history=50,
         )
         stream_service = StreamService(provider=llm_provider)
-
-        tool_registry = ToolRegistry(skill_registry)
         function_calling_orchestrator_cls = import_module(
             "backend.alice.application.workflow.function_calling_orchestrator"
         ).FunctionCallingOrchestrator

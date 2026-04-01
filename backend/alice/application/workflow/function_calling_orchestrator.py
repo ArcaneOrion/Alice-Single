@@ -6,7 +6,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from backend.alice.domain.execution.models.execution_result import ExecutionResult
-from backend.alice.domain.execution.models.tool_calling import ToolExecutionResult, ToolInvocation, ToolResultPayload
+from backend.alice.domain.execution.models.tool_calling import (
+    ToolArgumentValidationError,
+    ToolExecutionResult,
+    ToolInvocation,
+    ToolResultPayload,
+    UnknownToolError,
+)
 from backend.alice.domain.execution.services.execution_service import ExecutionService
 from backend.alice.domain.execution.services.tool_registry import ToolRegistry
 from backend.alice.domain.llm.models.message import ChatMessage
@@ -55,13 +61,17 @@ class FunctionCallingOrchestrator:
             tool_log_context["tool_call_id"] = invocation.id
 
             try:
-                if not self.tool_registry.has_tool(invocation.name):
-                    raise ValueError(f"未注册的工具: {invocation.name}")
+                self.tool_registry.require_tool(invocation.name)
                 execution_result = self.execution_service.execute_tool_call(
                     invocation,
                     log_context=tool_log_context,
                 )
             except Exception as exc:
+                error_type = "execution_error"
+                if isinstance(exc, UnknownToolError):
+                    error_type = exc.error_type
+                elif isinstance(exc, ToolArgumentValidationError):
+                    error_type = exc.error_type
                 fallback = ExecutionResult.error_result(str(exc))
                 execution_result = ToolExecutionResult(
                     invocation=invocation,
@@ -72,9 +82,24 @@ class FunctionCallingOrchestrator:
                         error=fallback.error,
                         exit_code=fallback.exit_code,
                         status=fallback.status.value,
-                        metadata=dict(fallback.metadata or {}),
+                        metadata={
+                            **dict(fallback.metadata or {}),
+                            "error_type": error_type,
+                        },
                     ),
-                    execution_result=fallback,
+                    execution_result=ExecutionResult(
+                        success=fallback.success,
+                        output=fallback.output,
+                        status=fallback.status,
+                        error=fallback.error,
+                        exit_code=fallback.exit_code,
+                        execution_time=fallback.execution_time,
+                        timestamp=fallback.timestamp,
+                        metadata={
+                            **dict(fallback.metadata or {}),
+                            "error_type": error_type,
+                        },
+                    ),
                 )
 
             execution_results.append(execution_result)

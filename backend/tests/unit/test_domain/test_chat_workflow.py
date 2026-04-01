@@ -7,6 +7,9 @@ from backend.alice.application.dto.requests import RequestContext, RequestType
 from backend.alice.application.dto.responses import RuntimeEventResponse, RuntimeEventType, ResponseType, StatusType
 from backend.alice.application.workflow.base_workflow import WorkflowContext
 from backend.alice.application.workflow.chat_workflow import ChatWorkflow
+from backend.alice.domain.execution.models.execution_result import ExecutionResult
+from backend.alice.domain.execution.models.tool_calling import ToolExecutionResult, ToolInvocation, ToolResultPayload
+from backend.alice.domain.llm.models.message import ChatMessage
 from backend.alice.domain.llm.models.stream_chunk import StreamChunk, TokenUsageUpdate, ToolCallDelta
 from backend.alice.domain.llm.providers.base import BaseLLMProvider
 from backend.alice.domain.llm.services.chat_service import ChatService
@@ -150,6 +153,64 @@ def test_chat_workflow_uses_merged_structured_tool_calls() -> None:
     assert provider.captured_kwargs is not None
     assert provider.captured_kwargs["tool_choice"] == "auto"
     assert len(provider.captured_kwargs["tools"]) == 2
+
+
+@pytest.mark.unit
+def test_chat_workflow_emits_tool_result_metadata_for_failure_types() -> None:
+    provider = _ToolCallStreamProvider()
+    chat_service = ChatService(provider=provider, system_prompt="You are Alice")
+    invocation = ToolInvocation(id="call_1", name="run_bash", arguments='{"command": "echo hello world"}')
+    orchestration_result = MagicMock()
+    orchestration_result.assistant_message = ChatMessage.assistant(
+        "Hello world",
+        tool_calls=[invocation.to_assistant_tool_call()],
+    )
+    orchestration_result.tool_messages = [
+        ChatMessage.tool(
+            content='{"tool_name": "run_bash", "success": false}',
+            tool_call_id="call_1",
+        )
+    ]
+    orchestration_result.execution_results = [
+        ToolExecutionResult(
+            invocation=invocation,
+            payload=ToolResultPayload(
+                tool_name="run_bash",
+                success=False,
+                output="",
+                error="run_bash 包含未定义参数: extra",
+                status="failure",
+                metadata={"error_type": "invalid_arguments"},
+            ),
+            execution_result=ExecutionResult.error_result("run_bash 包含未定义参数: extra"),
+        )
+    ]
+    orchestrator = MagicMock()
+    orchestrator.execute_tool_calls.return_value = orchestration_result
+
+    workflow = ChatWorkflow(
+        chat_service=chat_service,
+        execution_service=MagicMock(),
+        function_calling_orchestrator=orchestrator,
+    )
+
+    context = WorkflowContext(
+        request_context=RequestContext(
+            request_type=RequestType.CHAT,
+            metadata={"trace_id": "trace-1", "request_id": "req-1", "task_id": "task-1"},
+        ),
+        user_input="run something",
+    )
+
+    responses = list(workflow.execute(context))
+    tool_result_events = [
+        response for response in responses
+        if isinstance(response, RuntimeEventResponse) and response.event_type == RuntimeEventType.TOOL_RESULT
+    ]
+
+    assert len(tool_result_events) == 1
+    assert tool_result_events[0].payload["status"] == "failure"
+    assert tool_result_events[0].payload["metadata"]["error_type"] == "invalid_arguments"
 
 
 @pytest.mark.unit

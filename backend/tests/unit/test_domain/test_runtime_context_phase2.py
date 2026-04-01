@@ -8,7 +8,12 @@ import pytest
 from backend.alice.application.runtime import RuntimeContextBuilder, TimeProvider
 from backend.alice.application.workflow.function_calling_orchestrator import FunctionCallingOrchestrator
 from backend.alice.domain.execution.models.execution_result import ExecutionResult
-from backend.alice.domain.execution.models.tool_calling import ToolExecutionResult, ToolInvocation, ToolResultPayload
+from backend.alice.domain.execution.models.tool_calling import (
+    ToolArgumentValidationError,
+    ToolExecutionResult,
+    ToolInvocation,
+    ToolResultPayload,
+)
 from backend.alice.domain.execution.services.execution_service import ExecutionService, SkillSnapshotManager
 from backend.alice.domain.execution.services.tool_registry import ToolRegistry
 from backend.alice.domain.llm.models.message import ChatMessage
@@ -77,6 +82,21 @@ def test_runtime_context_builder_splits_history_and_current_question() -> None:
     assert "builtin_system_tools" in payload["tools"]
     assert payload["request_metadata"]["trace_id"] == "t1"
 
+    request_envelope = builder.build_request_envelope(
+        runtime_context=runtime_context,
+        messages=[
+            ChatMessage.system("system"),
+            ChatMessage.user("old question"),
+            ChatMessage.assistant("old answer"),
+        ],
+    )
+    envelope_payload = request_envelope.to_dict()
+    assert envelope_payload["system"]["prompt"] == "You are Alice"
+    assert envelope_payload["messages"][0]["content"] == "old question"
+    assert envelope_payload["messages"][-1]["content"] == "current question"
+    assert envelope_payload["model_context"]["memory_snapshot"]["working"] == "working"
+    assert envelope_payload["request_metadata"]["span_id"] == "span1"
+
 
 @pytest.mark.unit
 def test_skill_snapshot_manager_reads_registry_and_cache() -> None:
@@ -137,6 +157,36 @@ def test_tool_registry_snapshot_exposes_four_categories_and_openai_tools() -> No
 
     openai_tools = registry.list_openai_tools()
     assert [tool["function"]["name"] for tool in openai_tools] == ["run_bash", "run_python"]
+
+
+@pytest.mark.unit
+def test_tool_registry_validates_arguments_from_schema_single_source() -> None:
+    registry = ToolRegistry()
+
+    assert registry.validate_tool_arguments("run_bash", '{"command": "echo hi"}') == {"command": "echo hi"}
+
+    with pytest.raises(ToolArgumentValidationError, match="run_bash 包含未定义参数: extra"):
+        registry.validate_tool_arguments("run_bash", '{"command": "echo hi", "extra": true}')
+
+    with pytest.raises(ToolArgumentValidationError, match="run_python.code 必须是 string"):
+        registry.validate_tool_arguments("run_python", '{"code": 1}')
+
+
+@pytest.mark.unit
+def test_execution_service_uses_tool_registry_schema_validation() -> None:
+    executor = MagicMock()
+    service = ExecutionService(executor=executor, tool_registry=ToolRegistry())
+
+    invocation = ToolInvocation(
+        id="call_schema",
+        name="run_bash",
+        arguments='{"command": "echo hi", "extra": true}',
+    )
+
+    with pytest.raises(ToolArgumentValidationError, match="run_bash 包含未定义参数: extra"):
+        service.execute_tool_call(invocation)
+
+    executor.execute.assert_not_called()
 
 
 @pytest.mark.unit
@@ -216,9 +266,39 @@ def test_function_calling_orchestrator_returns_fallback_for_unregistered_tool() 
     assert result.execution_results[0].payload.success is False
     assert result.execution_results[0].payload.error == "未注册的工具: missing_tool"
     assert result.execution_results[0].payload.status == "failure"
+    assert result.execution_results[0].payload.metadata["error_type"] == "unknown_tool"
+    assert result.execution_results[0].execution_result.metadata["error_type"] == "unknown_tool"
     assert result.tool_messages[0].tool_call_id == "call_2"
     assert '"success": false' in result.tool_messages[0].content
     execution_service.execute_tool_call.assert_not_called()
+
+
+@pytest.mark.unit
+def test_function_calling_orchestrator_returns_fallback_for_invalid_arguments() -> None:
+    execution_service = MagicMock()
+    execution_service.execute_tool_call.side_effect = ToolArgumentValidationError("run_bash 包含未定义参数: extra")
+    orchestrator = FunctionCallingOrchestrator(execution_service=execution_service, tool_registry=ToolRegistry())
+
+    result = orchestrator.execute_tool_calls(
+        [
+            {
+                "id": "call_invalid",
+                "type": "function",
+                "index": 0,
+                "function": {
+                    "name": "run_bash",
+                    "arguments": '{"command": "echo hi", "extra": true}',
+                },
+            }
+        ]
+    )
+
+    assert len(result.execution_results) == 1
+    assert result.execution_results[0].payload.success is False
+    assert result.execution_results[0].payload.error == "run_bash 包含未定义参数: extra"
+    assert result.execution_results[0].payload.metadata["error_type"] == "invalid_arguments"
+    assert result.execution_results[0].execution_result.metadata["error_type"] == "invalid_arguments"
+    execution_service.execute_tool_call.assert_called_once()
 
 
 @pytest.mark.unit
@@ -246,5 +326,7 @@ def test_function_calling_orchestrator_returns_fallback_when_execution_raises() 
     assert result.execution_results[0].payload.success is False
     assert result.execution_results[0].payload.error == "boom"
     assert result.execution_results[0].payload.status == "failure"
+    assert result.execution_results[0].payload.metadata["error_type"] == "execution_error"
+    assert result.execution_results[0].execution_result.metadata["error_type"] == "execution_error"
     assert result.tool_messages[0].tool_call_id == "call_3"
     execution_service.execute_tool_call.assert_called_once()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -16,6 +17,24 @@ class ToolCategory(str, Enum):
     SKILLS = "skills"
     TERMINAL_COMMANDS = "terminal_commands"
     CODE_EXECUTION = "code_execution"
+
+
+class ToolSchemaError(ValueError):
+    """工具 schema 相关错误基类。"""
+
+    error_type = "tool_schema_error"
+
+
+class UnknownToolError(ToolSchemaError):
+    """未注册工具错误。"""
+
+    error_type = "unknown_tool"
+
+
+class ToolArgumentValidationError(ToolSchemaError):
+    """工具参数校验错误。"""
+
+    error_type = "invalid_arguments"
 
 
 @dataclass(frozen=True)
@@ -95,6 +114,42 @@ class ToolSchemaDefinition:
                 "parameters": self.parameters,
             },
         }
+
+    def parse_and_validate_arguments(self, arguments: str) -> dict[str, Any]:
+        try:
+            payload = json.loads(arguments or "{}")
+        except json.JSONDecodeError as exc:
+            raise ToolArgumentValidationError(f"无效的工具参数 JSON: {exc}") from exc
+        if not isinstance(payload, dict):
+            raise ToolArgumentValidationError("工具参数必须是 JSON object")
+
+        schema_type = self.parameters.get("type")
+        if schema_type and schema_type != "object":
+            raise ToolArgumentValidationError(f"不支持的工具参数 schema type: {schema_type}")
+
+        properties = self.parameters.get("properties") or {}
+        required = self.parameters.get("required") or []
+        additional_properties = self.parameters.get("additionalProperties", True)
+
+        for field_name in required:
+            value = payload.get(field_name)
+            if value in (None, ""):
+                raise ToolArgumentValidationError(f"{self.name} 缺少 {field_name} 参数")
+
+        if additional_properties is False:
+            unexpected = sorted(key for key in payload if key not in properties)
+            if unexpected:
+                joined = ", ".join(unexpected)
+                raise ToolArgumentValidationError(f"{self.name} 包含未定义参数: {joined}")
+
+        for field_name, schema in properties.items():
+            if field_name not in payload:
+                continue
+            expected_type = schema.get("type")
+            if expected_type == "string" and not isinstance(payload[field_name], str):
+                raise ToolArgumentValidationError(f"{self.name}.{field_name} 必须是 string")
+
+        return payload
 
 
 @dataclass(frozen=True)

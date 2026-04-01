@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from ..models import (
+    ToolArgumentValidationError,
     ToolCategory,
     ToolDescriptor,
     ToolRegistrySnapshot,
     ToolSchemaDefinition,
+    UnknownToolError,
 )
 from ...skills.services.skill_registry import SkillRegistry
 
@@ -64,6 +66,19 @@ class ToolRegistry:
 
     def get_tool(self, name: str) -> ToolSchemaDefinition | None:
         return self._tools.get(name)
+
+    def require_tool(self, name: str) -> ToolSchemaDefinition:
+        tool = self.get_tool(name)
+        if tool is None:
+            raise UnknownToolError(f"未注册的工具: {name}")
+        return tool
+
+    def validate_tool_arguments(self, name: str, arguments: str) -> dict[str, object]:
+        tool = self.require_tool(name)
+        payload = tool.parse_and_validate_arguments(arguments)
+        if not isinstance(payload, dict):
+            raise ToolArgumentValidationError("工具参数必须是 JSON object")
+        return payload
 
     def has_tool(self, name: str) -> bool:
         return name in self._tools

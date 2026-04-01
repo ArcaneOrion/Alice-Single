@@ -6,6 +6,7 @@ from .command import Command, CommandType, ExecutionEnvironment
 from .execution_result import ExecutionResult, ExecutionStatus
 from .security_rule import SecurityRule, SecurityAction, DEFAULT_SECURITY_RULES
 from .tool_calling import (
+    ToolArgumentValidationError,
     ToolCategory,
     ToolDescriptor,
     ToolExecutionResult,
@@ -13,6 +14,8 @@ from .tool_calling import (
     ToolRegistrySnapshot,
     ToolResultPayload,
     ToolSchemaDefinition,
+    ToolSchemaError,
+    UnknownToolError,
 )
 
 __all__ = [
@@ -24,6 +27,7 @@ __all__ = [
     "SecurityRule",
     "SecurityAction",
     "DEFAULT_SECURITY_RULES",
+    "ToolArgumentValidationError",
     "ToolCategory",
     "ToolDescriptor",
     "ToolExecutionResult",
@@ -31,4 +35,6 @@ __all__ = [
     "ToolRegistrySnapshot",
     "ToolResultPayload",
     "ToolSchemaDefinition",
+    "ToolSchemaError",
+    "UnknownToolError",
 ]
