@@ -5,11 +5,12 @@ Bridge 通信集成测试
 """
 
 import json
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from backend.alice.application.dto.responses import (
+    ContentResponse,
     ExecutingToolResponse,
     RuntimeEventResponse,
     RuntimeEventType,
@@ -405,6 +406,7 @@ class _RecordingTransport(TransportProtocol):
         self._running = False
         self._message_callback = None
         self._eof_callback = None
+        self._has_pending_interrupt = False
 
     def start(self) -> None:
         self._running = True
@@ -426,6 +428,17 @@ class _RecordingTransport(TransportProtocol):
 
     def is_running(self) -> bool:
         return self._running
+
+    def drain_pending_interrupts(self) -> bool:
+        found = self._has_pending_interrupt
+        self._has_pending_interrupt = False
+        return found
+
+    def seed_pending_interrupt(self, pending: bool = True) -> None:
+        self._has_pending_interrupt = pending
+
+    def has_pending_interrupt(self) -> bool:
+        return self._has_pending_interrupt
 
 
 class TestBridgeServerOutputCompatibility:
@@ -471,6 +484,43 @@ class TestBridgeServerOutputCompatibility:
         server.send_raw_message(payload)
 
         assert transport.sent_messages == [payload]
+
+
+class TestBridgeHandlerCompatibility:
+    """Bridge handler 必须复用 agent.chat 与 legacy serializer。"""
+
+    def test_message_handler_forwards_agent_chat_responses(self):
+        transport = _RecordingTransport()
+        agent = MagicMock()
+        agent.chat.return_value = [
+            ContentResponse(content="hello bridge"),
+            RuntimeEventResponse(
+                event_type=RuntimeEventType.TOOL_CALL_STARTED,
+                payload={"tool_name": "run_bash"},
+            ),
+        ]
+        server = BridgeServer(agent=agent, transport=transport)
+
+        server.message_handler.handle_input("hello")
+
+        agent.chat.assert_called_once_with("hello")
+        assert transport.sent_messages == [
+            {"type": "content", "content": "hello bridge"},
+            {"type": "status", "content": "executing_tool"},
+        ]
+
+    def test_interrupt_handler_propagates_to_agent_interrupt(self):
+        transport = _RecordingTransport()
+        transport.seed_pending_interrupt()
+        agent = MagicMock()
+        server = BridgeServer(agent=agent, transport=transport)
+
+        found = server.interrupt_handler.check_interrupt()
+        assert transport.has_pending_interrupt() is False
+
+        assert found is True
+        agent.interrupt.assert_called_once_with()
+        assert server.interrupt_handler.interrupt_count == 1
 
 
 class TestProtocolCompatibility:

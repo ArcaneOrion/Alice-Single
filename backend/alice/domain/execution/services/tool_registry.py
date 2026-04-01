@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..models.tool_calling import (
+from ..models import (
     ToolCategory,
     ToolDescriptor,
     ToolRegistrySnapshot,

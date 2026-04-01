@@ -7,13 +7,13 @@
 from __future__ import annotations
 
 import logging
+from importlib import import_module
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import Any, Optional
 
-from backend.alice.application.runtime import RuntimeContextBuilder
-
-if TYPE_CHECKING:
-    from backend.alice.application.workflow.function_calling_orchestrator import FunctionCallingOrchestrator
+RuntimeContextBuilder = import_module(
+    "backend.alice.application.runtime"
+).RuntimeContextBuilder
 from backend.alice.domain.memory.services.memory_manager import MemoryManager
 from backend.alice.domain.execution.services.execution_service import ExecutionService
 from backend.alice.domain.execution.services.tool_registry import ToolRegistry
@@ -42,7 +42,7 @@ class OrchestrationService:
         skill_registry: Optional[SkillRegistry] = None,
         llm_provider: Optional[OpenAIProvider] = None,
         tool_registry: Optional[ToolRegistry] = None,
-        function_calling_orchestrator: FunctionCallingOrchestrator | None = None,
+        function_calling_orchestrator: Any | None = None,
     ):
         """初始化编排服务
 
@@ -60,7 +60,7 @@ class OrchestrationService:
         self.skill_registry: Optional[SkillRegistry] = skill_registry
         self.llm_provider: Optional[OpenAIProvider] = llm_provider
         self.tool_registry: Optional[ToolRegistry] = tool_registry
-        self.function_calling_orchestrator: Optional[FunctionCallingOrchestrator] = function_calling_orchestrator
+        self.function_calling_orchestrator: Any | None = function_calling_orchestrator
         self.runtime_context_builder = RuntimeContextBuilder()
         self.runtime_context: dict[str, object] = {}
 
@@ -156,7 +156,10 @@ class OrchestrationService:
         stream_service = StreamService(provider=llm_provider)
 
         tool_registry = ToolRegistry(skill_registry)
-        function_calling_orchestrator = FunctionCallingOrchestrator(
+        function_calling_orchestrator_cls = import_module(
+            "backend.alice.application.workflow.function_calling_orchestrator"
+        ).FunctionCallingOrchestrator
+        function_calling_orchestrator = function_calling_orchestrator_cls(
             execution_service=execution_service,
             tool_registry=tool_registry,
         )

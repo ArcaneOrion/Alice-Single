@@ -7,8 +7,6 @@ Message Handler
 import logging
 from typing import TYPE_CHECKING, Any, Optional
 
-from backend.alice.application.dto import response_to_dict
-
 from ..protocol.messages import INTERRUPT_SIGNAL
 
 if TYPE_CHECKING:
@@ -44,6 +42,13 @@ def _summarize_text(text: str, limit: int = 120) -> str:
     if len(cleaned) <= limit:
         return cleaned
     return f"{cleaned[:limit]}..."
+
+
+def _serialize_response(response: Any) -> dict[str, Any] | None:
+    """惰性导入 DTO 序列化函数，避免 bridge 初始化环。"""
+    from backend.alice.application.dto.responses import response_to_dict
+
+    return response_to_dict(response)
 
 
 class MessageHandler:
@@ -105,7 +110,7 @@ class MessageHandler:
         try:
             self._processing = True
             for response in agent.chat(user_input):
-                data = response_to_dict(response)
+                data = _serialize_response(response)
                 if data is None:
                     skipped_responses += 1
                     continue
