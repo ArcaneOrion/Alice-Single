@@ -9,9 +9,18 @@
   - `docs/reference/code-map-coupling.md`
 - 分层边界与依赖方向：
   - `docs/architecture/overview.md`
-- Bridge 协议：
+- Runtime Context、Tool Registry 与工具调用编排：
+  - `docs/reference/code-map.md`
+  - `docs/reference/code-map-structure.md`
+  - `docs/reference/code-map-coupling.md`
+  - `backend/alice/application/runtime/`
+  - `backend/alice/application/workflow/function_calling_orchestrator.py`
+  - `backend/alice/domain/execution/services/tool_registry.py`
+- Bridge 协议与当前默认运行边界：
   - `docs/protocols/bridge.md`
   - `protocols/bridge_schema.json`
+  - `backend/alice/application/dto/responses.py`
+  - `backend/alice/infrastructure/bridge/legacy_compatibility_serializer.py`
 - 测试策略与运行方式：
   - `docs/testing/guide.md`
   - `backend/tests/README.md`

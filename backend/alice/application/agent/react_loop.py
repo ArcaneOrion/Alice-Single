@@ -5,13 +5,11 @@ ReAct 循环引擎
 """
 
 import logging
-from typing import Iterator, Optional, Callable
-from dataclasses import dataclass, field
+from typing import Callable, Iterator, Optional
+from dataclasses import dataclass
 
 from ..dto import (
     ApplicationResponse,
-    RequestContext,
-    WorkflowContext,
     StatusResponse,
     ThinkingResponse,
     ContentResponse,
@@ -21,7 +19,6 @@ from ..dto import (
     TokensResponse,
     StatusType,
 )
-
 
 logger = logging.getLogger(__name__)
 

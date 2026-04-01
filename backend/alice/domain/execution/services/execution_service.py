@@ -10,8 +10,11 @@ import time
 import traceback
 from typing import Callable, Optional
 
+from backend.alice.core.config import load_config
+
 from ..executors.docker_executor import DockerExecutor
-from ..models.execution_result import ExecutionResult
+from ..models.execution_result import ExecutionResult, ExecutionStatus
+from ..models.tool_calling import ToolExecutionResult, ToolInvocation, ToolResultPayload
 from ..builtin.memory_command import MemoryCommandHandler
 from ..builtin.todo_command import TodoCommandHandler
 from ..builtin.toolkit_command import ToolkitCommandHandler
@@ -26,7 +29,7 @@ def _command_preview(command: str, limit: int = 200) -> str:
     return f"{normalized[:limit]}..."
 
 
-class ExecutionService:
+class _ExecutionServiceBase:
     """命令执行服务
 
     统一的命令执行入口，处理内置命令拦截和容器执行路由
@@ -38,7 +41,7 @@ class ExecutionService:
         snapshot_manager=None
     ):
         self.executor = executor or DockerExecutor()
-        self.snapshot_manager = snapshot_manager
+        self.snapshot_manager = None
 
         # 内置命令处理器
         self._builtin_handlers: dict[str, Callable] = {
@@ -51,7 +54,148 @@ class ExecutionService:
         # 具体命令处理器实例
         self._memory_handler = MemoryCommandHandler()
         self._todo_handler = TodoCommandHandler()
-        self._toolkit_handler = ToolkitCommandHandler(snapshot_manager)
+        self._toolkit_handler = ToolkitCommandHandler()
+        self.set_snapshot_manager(snapshot_manager)
+
+    def execute_tool_call(
+        self,
+        invocation: ToolInvocation,
+        log_context: Optional[dict] = None,
+    ) -> ToolExecutionResult:
+        raise NotImplementedError
+
+    def _handle_toolkit(self, full_command: str, args: list[str]) -> str:
+        raise NotImplementedError
+
+    def _handle_update_prompt(self, full_command: str, args: list[str]) -> str:
+        raise NotImplementedError
+
+    def _handle_todo(self, full_command: str, args: list[str]) -> str:
+        raise NotImplementedError
+
+    def _handle_memory(self, full_command: str, args: list[str]) -> str:
+        raise NotImplementedError
+
+    def set_snapshot_manager(self, snapshot_manager) -> None:
+        """同步更新技能快照依赖。"""
+        self.snapshot_manager = snapshot_manager
+        self._toolkit_handler.snapshot_manager = snapshot_manager
+
+    def set_skill_registry(self, skill_registry) -> None:
+        """将 SkillRegistry 适配为 toolkit 与 skills 文件读取依赖。"""
+        self.set_snapshot_manager(SkillSnapshotManager(skill_registry))
+
+    def set_skill_snapshot(self, skill_registry, skill_cache) -> None:
+        """同时接入 SkillRegistry 与 SkillCache。"""
+        self.set_snapshot_manager(SkillSnapshotManager(skill_registry, skill_cache))
+
+    def execute_tool_invocation(
+        self,
+        invocation: ToolInvocation,
+        log_context: Optional[dict] = None,
+    ) -> ToolExecutionResult:
+        return self.execute_tool_call(invocation, log_context=log_context)
+
+    @staticmethod
+    def _parse_tool_arguments(arguments: str) -> dict:
+        import json
+
+        try:
+            payload = json.loads(arguments or "{}")
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"无效的工具参数 JSON: {exc}") from exc
+        if not isinstance(payload, dict):
+            raise ValueError("工具参数必须是 JSON object")
+        return payload
+
+    @staticmethod
+    def _coerce_tool_result(
+        invocation: ToolInvocation,
+        raw_result: ExecutionResult | str,
+    ) -> ToolExecutionResult:
+        if isinstance(raw_result, ExecutionResult):
+            execution_result = raw_result
+        else:
+            output_text = str(raw_result)
+            execution_result = ExecutionResult(
+                success=True,
+                output=output_text,
+                status=ExecutionStatus.SUCCESS,
+                error="",
+                exit_code=0,
+            )
+
+        payload = ToolResultPayload(
+            tool_name=invocation.name,
+            success=execution_result.success,
+            output=execution_result.output,
+            error=execution_result.error,
+            exit_code=execution_result.exit_code,
+            status=execution_result.status.value,
+            metadata=dict(execution_result.metadata or {}),
+        )
+        return ToolExecutionResult(
+            invocation=invocation,
+            payload=payload,
+            execution_result=execution_result,
+        )
+
+
+class SkillSnapshotManager:
+    """统一适配 SkillRegistry / SkillCache 给 execution/toolkit 使用。"""
+
+    def __init__(self, skill_registry, skill_cache=None):
+        self._skill_registry = skill_registry
+        self._skill_cache = skill_cache
+
+    @property
+    def skills(self) -> dict[str, dict]:
+        if not self._skill_registry:
+            return {}
+        return {
+            name: skill.to_dict()
+            for name, skill in self._skill_registry.get_all_skills().items()
+        }
+
+    def refresh(self) -> int:
+        if self._skill_registry is None:
+            return 0
+        count = self._skill_registry.refresh()
+        if self._skill_cache is not None:
+            self._skill_cache.clear_cache()
+        return count
+
+    def read_skill_file(self, relative_path: str) -> str | None:
+        if self._skill_cache is not None:
+            cached = self._skill_cache.read_skill_file(relative_path)
+            if cached is not None:
+                return cached
+
+        if self._skill_registry is None:
+            return None
+
+        normalized = relative_path.strip().lstrip("/")
+        if not normalized:
+            return None
+
+        skill_name, _, remainder = normalized.partition("/")
+        skill = self._skill_registry.get_skill(skill_name)
+        if skill is None:
+            return None
+
+        if not remainder or remainder == "SKILL.md":
+            return skill.path.read_text(encoding="utf-8", errors="ignore")
+        if skill.script_path and remainder == skill.script_path.name:
+            return skill.script_path.read_text(encoding="utf-8", errors="ignore")
+        return None
+
+
+class ExecutionService(_ExecutionServiceBase):
+    """命令执行服务
+
+    统一的命令执行入口，处理内置命令拦截和容器执行路由
+    """
+
 
     def _build_log_context(self, log_context: Optional[dict], phase: str) -> dict:
         """构建执行链路日志上下文。"""
@@ -301,6 +445,37 @@ class ExecutionService:
         )
         return result
 
+    def execute_tool_invocation(
+        self,
+        invocation: ToolInvocation,
+        log_context: Optional[dict] = None,
+    ) -> ToolExecutionResult:
+        """兼容 ChatWorkflow 的结构化工具调用入口。"""
+        return self.execute_tool_call(invocation, log_context=log_context)
+
+    def execute_tool_call(
+        self,
+        invocation: ToolInvocation,
+        log_context: Optional[dict] = None,
+    ) -> ToolExecutionResult:
+        """执行结构化工具调用。"""
+        payload = self._parse_tool_arguments(invocation.arguments)
+
+        if invocation.name == "run_bash":
+            command = str(payload.get("command") or "")
+            if not command:
+                raise ValueError("run_bash 缺少 command 参数")
+            raw_result = self.execute(command, is_python_code=False, log_context=log_context)
+        elif invocation.name == "run_python":
+            command = str(payload.get("code") or "")
+            if not command:
+                raise ValueError("run_python 缺少 code 参数")
+            raw_result = self.execute(command, is_python_code=True, log_context=log_context)
+        else:
+            raise ValueError(f"不支持的工具: {invocation.name}")
+
+        return self._coerce_tool_result(invocation, raw_result)
+
     def _try_handle_builtin(self, command: str) -> Optional[str]:
         """尝试处理内置命令
 
@@ -359,53 +534,57 @@ class ExecutionService:
 
     def _handle_todo(self, full_command: str, args: list[str]) -> str:
         """处理 todo 命令"""
-        import config
+        settings = load_config()
+        todo_path = str(settings.get_absolute_path(settings.memory.todo_path))
 
         # 尝试匹配引号包裹的内容
         content_match = re.search(r'["\'](.*?)["\']', full_command, re.DOTALL)
         if content_match:
-            return self._todo_handler.handle_write(content_match.group(1), config.TODO_FILE_PATH)
+            return self._todo_handler.handle_write(content_match.group(1), todo_path)
 
         parts = full_command.split(None, 1)
         if len(parts) > 1:
             content = parts[1].strip().strip('"\'')
-            return self._todo_handler.handle_write(content, config.TODO_FILE_PATH)
+            return self._todo_handler.handle_write(content, todo_path)
 
         return "错误: todo 指令需要提供任务清单内容。"
 
     def _handle_memory(self, full_command: str, args: list[str]) -> str:
         """处理 memory 命令"""
-        import config
+        settings = load_config()
 
         # 极简解析: memory "content" [--ltm]
         ltm_mode = "--ltm" in full_command
-        content_match = re.search(r'["\'](.*?)["\']', full_command, re.DOTALL)
-        if content_match:
-            target_path = config.MEMORY_FILE_PATH if ltm_mode else config.SHORT_TERM_MEMORY_FILE_PATH
+        target_path = str(
+            settings.get_absolute_path(
+                settings.memory.ltm_path if ltm_mode else settings.memory.stm_path
+            )
+        )
+        if content_match := re.search(r'["\'](.*?)["\']', full_command, re.DOTALL):
             return self._memory_handler.handle_write(
                 content_match.group(1),
                 target_path,
                 target="ltm" if ltm_mode else "stm"
             )
-        else:
-            parts = full_command.split(None, 1)
-            if len(parts) > 1:
-                content = parts[1].replace("--ltm", "").strip().strip('"\'')
-                target_path = config.MEMORY_FILE_PATH if ltm_mode else config.SHORT_TERM_MEMORY_FILE_PATH
-                return self._memory_handler.handle_write(
-                    content,
-                    target_path,
-                    target="ltm" if ltm_mode else "stm"
-                )
+
+        parts = full_command.split(None, 1)
+        if len(parts) > 1:
+            content = parts[1].replace("--ltm", "").strip().strip('"\'')
+            return self._memory_handler.handle_write(
+                content,
+                target_path,
+                target="ltm" if ltm_mode else "stm"
+            )
 
         return "错误: memory 指令需要提供记忆内容。"
 
     def _update_prompt_file(self, content: str) -> str:
         """更新提示词文件"""
-        import config
+        settings = load_config()
+        prompt_path = settings.get_absolute_path(settings.prompt_path)
 
         try:
-            with open(config.DEFAULT_PROMPT_PATH, "w", encoding="utf-8") as f:
+            with open(prompt_path, "w", encoding="utf-8") as f:
                 f.write(content.strip())
             return "已成功更新宿主机人设文件 (prompts/alice.md)。新指令将在下一轮对话生效。"
         except Exception as e:

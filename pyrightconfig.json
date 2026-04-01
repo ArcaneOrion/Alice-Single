@@ -1,0 +1,18 @@
+{
+  "include": [
+    "backend/alice",
+    "backend/tests"
+  ],
+  "exclude": [
+    ".claude/worktrees",
+    "**/__pycache__"
+  ],
+  "executionEnvironments": [
+    {
+      "root": ".",
+      "extraPaths": [
+        "."
+      ]
+    }
+  ]
+}

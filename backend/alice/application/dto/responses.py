@@ -6,7 +6,11 @@
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional, Any
+from typing import Any
+
+from backend.alice.infrastructure.bridge.legacy_compatibility_serializer import (
+    serialize_application_response,
+)
 
 
 class ResponseType(str, Enum):
@@ -19,6 +23,7 @@ class ResponseType(str, Enum):
     TOKENS = "tokens"
     EXECUTING_TOOL = "executing_tool"
     DONE = "done"
+    RUNTIME_EVENT = "runtime_event"
 
 
 class StatusType(str, Enum):
@@ -26,9 +31,93 @@ class StatusType(str, Enum):
 
     READY = "ready"
     THINKING = "thinking"
+    STREAMING = "streaming"
     EXECUTING_TOOL = "executing_tool"
     DONE = "done"
     ERROR = "error"
+    INTERRUPTED = "interrupted"
+
+
+class RuntimeEventType(str, Enum):
+    """运行时事件类型枚举"""
+
+    STATUS_CHANGED = "status_changed"
+    REASONING_DELTA = "reasoning_delta"
+    CONTENT_DELTA = "content_delta"
+    TOOL_CALL_STARTED = "tool_call_started"
+    TOOL_CALL_ARGUMENT_DELTA = "tool_call_argument_delta"
+    TOOL_CALL_COMPLETED = "tool_call_completed"
+    TOOL_RESULT = "tool_result"
+    USAGE_UPDATED = "usage_updated"
+    MESSAGE_COMPLETED = "message_completed"
+    ERROR_RAISED = "error_raised"
+    INTERRUPT_ACK = "interrupt_ack"
+
+
+@dataclass(frozen=True)
+class StructuredToolCall:
+    """结构化工具调用"""
+
+    index: int = 0
+    id: str = ""
+    type: str = ""
+    function_name: str = ""
+    function_arguments: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "index": self.index,
+            "id": self.id,
+            "type": self.type,
+            "function_name": self.function_name,
+            "function_arguments": self.function_arguments,
+        }
+
+
+@dataclass(frozen=True)
+class StructuredToolResult:
+    """结构化工具结果"""
+
+    tool_call_id: str = ""
+    tool_type: str = ""
+    content: str = ""
+    status: str = "success"
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "tool_call_id": self.tool_call_id,
+            "tool_type": self.tool_type,
+            "content": self.content,
+            "status": self.status,
+            "metadata": dict(self.metadata),
+        }
+
+
+@dataclass(frozen=True)
+class StructuredRuntimeOutput:
+    """后端 canonical structured runtime 输出"""
+
+    message_id: str = ""
+    status: str = ""
+    reasoning: str = ""
+    content: str = ""
+    tool_calls: list[StructuredToolCall] = field(default_factory=list)
+    tool_results: list[StructuredToolResult] = field(default_factory=list)
+    usage: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "message_id": self.message_id,
+            "status": self.status,
+            "reasoning": self.reasoning,
+            "content": self.content,
+            "tool_calls": [tool_call.to_dict() for tool_call in self.tool_calls],
+            "tool_results": [tool_result.to_dict() for tool_result in self.tool_results],
+            "usage": dict(self.usage),
+            "metadata": dict(self.metadata),
+        }
 
 
 @dataclass(frozen=True)
@@ -100,7 +189,7 @@ class ExecutingToolResponse(BaseResponse):
     """
 
     response_type: ResponseType = ResponseType.EXECUTING_TOOL
-    tool_type: str = ""  # "python" or "bash"
+    tool_type: str = ""
     command_preview: str = ""
 
 
@@ -114,6 +203,16 @@ class DoneResponse(BaseResponse):
     response_type: ResponseType = ResponseType.DONE
 
 
+@dataclass(frozen=True)
+class RuntimeEventResponse(BaseResponse):
+    """内部 structured runtime 事件响应"""
+
+    response_type: ResponseType = ResponseType.RUNTIME_EVENT
+    event_type: RuntimeEventType = RuntimeEventType.STATUS_CHANGED
+    payload: dict[str, Any] = field(default_factory=dict)
+    runtime_output: StructuredRuntimeOutput | None = None
+
+
 # 联合类型：所有可能的响应
 ApplicationResponse = (
     ContentResponse
@@ -123,6 +222,7 @@ ApplicationResponse = (
     | TokensResponse
     | ExecutingToolResponse
     | DoneResponse
+    | RuntimeEventResponse
 )
 
 
@@ -178,41 +278,23 @@ class AgentStatus:
     skills_count: int = 0
 
 
-def response_to_dict(response: ApplicationResponse) -> dict[str, Any]:
-    """将响应转换为字典（用于 JSON 序列化）
+def application_response_to_legacy_dict(response: ApplicationResponse) -> dict[str, Any] | None:
+    """统一通过 compatibility serializer 投影到 legacy bridge 输出。"""
+    return serialize_application_response(response)
 
-    Args:
-        response: 响应对象
 
-    Returns:
-        字典格式的响应
-    """
-    if isinstance(response, ContentResponse):
-        return {"type": "content", "content": response.content}
-    elif isinstance(response, ThinkingResponse):
-        return {"type": "thinking", "content": response.content}
-    elif isinstance(response, StatusResponse):
-        return {"type": "status", "content": response.status.value}
-    elif isinstance(response, ErrorResponse):
-        return {"type": "error", "content": response.content, "code": response.code}
-    elif isinstance(response, TokensResponse):
-        return {
-            "type": "tokens",
-            "total": response.total,
-            "prompt": response.prompt,
-            "completion": response.completion,
-        }
-    elif isinstance(response, ExecutingToolResponse):
-        return {"type": "executing_tool", "tool_type": response.tool_type}
-    elif isinstance(response, DoneResponse):
-        return {"type": "status", "content": "done"}
-    else:
-        return {"type": "unknown"}
+def response_to_dict(response: ApplicationResponse) -> dict[str, Any] | None:
+    """将响应转换为 legacy bridge 字典（用于 JSON 序列化）"""
+    return application_response_to_legacy_dict(response)
 
 
 __all__ = [
     "ResponseType",
     "StatusType",
+    "RuntimeEventType",
+    "StructuredToolCall",
+    "StructuredToolResult",
+    "StructuredRuntimeOutput",
     "BaseResponse",
     "ContentResponse",
     "ThinkingResponse",
@@ -221,6 +303,7 @@ __all__ = [
     "TokensResponse",
     "ExecutingToolResponse",
     "DoneResponse",
+    "RuntimeEventResponse",
     "ApplicationResponse",
     "ChatResult",
     "AgentStatus",

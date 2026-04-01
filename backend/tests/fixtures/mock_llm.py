@@ -4,7 +4,7 @@ Mock LLM Provider 实现
 用于测试时模拟 LLM API 调用
 """
 
-from typing import Iterator, list
+from typing import Iterator
 from dataclasses import dataclass
 from datetime import datetime
 

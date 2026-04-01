@@ -8,7 +8,7 @@ import time
 from typing import Any, Callable, Iterator
 
 from backend.alice.domain.llm.models.message import ChatMessage
-from backend.alice.domain.llm.models.response import ChatResponse, TokenUsage
+from backend.alice.domain.llm.models.response import ChatResponse, TokenUsage, normalize_tool_call
 from backend.alice.domain.llm.providers.base import (
     BaseLLMProvider,
     build_error_payload,
@@ -68,6 +68,92 @@ def _merge_tool_call_state(
 
 def _tool_call_state_to_list(tool_call_state: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:
     return [sanitize_for_log(tool_call_state[index]) for index in sorted(tool_call_state)]
+
+
+def _normalize_aggregated_tool_calls(tool_call_state: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        normalize_tool_call(
+            {
+                "id": tool_call.get("id") or "",
+                "type": tool_call.get("type") or "function",
+                "index": tool_call.get("index", index),
+                "function_name": tool_call.get("function_name") or "",
+                "function_arguments": tool_call.get("function_arguments") or "",
+            },
+            index=index,
+        )
+        for index, tool_call in sorted(tool_call_state.items())
+    ]
+
+
+
+def _token_usage_from_chunk_usage(chunk_usage: Any) -> TokenUsage | None:
+    if not chunk_usage:
+        return None
+
+    if isinstance(chunk_usage, dict):
+        return TokenUsage.from_dict(chunk_usage)
+
+    return TokenUsage(
+        prompt_tokens=int(getattr(chunk_usage, "prompt_tokens", 0) or 0),
+        completion_tokens=int(getattr(chunk_usage, "completion_tokens", 0) or 0),
+        total_tokens=int(getattr(chunk_usage, "total_tokens", 0) or 0),
+    )
+
+
+
+def _supports_structured_tool_calling(provider: BaseLLMProvider) -> bool:
+    model_name = (getattr(provider, "model_name", "") or "").lower()
+    if not model_name:
+        return False
+
+    unsupported_markers = (
+        "deepseek-reasoner",
+        "o1-mini",
+        "o1-preview",
+    )
+    return not any(marker in model_name for marker in unsupported_markers)
+
+
+
+def build_tool_kwargs(provider: BaseLLMProvider, tools: list[dict], metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    request_kwargs: dict[str, Any] = {}
+    if metadata:
+        request_kwargs["metadata"] = dict(metadata)
+    if not tools:
+        return request_kwargs
+    if not _supports_structured_tool_calling(provider):
+        model_name = getattr(provider, "model_name", "") or ""
+        raise ValueError(f"当前模型不支持结构化 tool calling: {model_name}")
+    request_kwargs.update({
+        "tools": tools,
+        "tool_choice": "auto",
+    })
+    return request_kwargs
+
+
+
+def supports_structured_tool_calling(provider: BaseLLMProvider) -> bool:
+    return _supports_structured_tool_calling(provider)
+
+
+
+def merge_tool_call_state(
+    tool_call_state: dict[int, dict[str, Any]],
+    tool_calls: list[Any],
+) -> list[dict[str, Any]]:
+    return _merge_tool_call_state(tool_call_state, tool_calls)
+
+
+
+def normalized_tool_calls(tool_call_state: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:
+    return _normalize_aggregated_tool_calls(tool_call_state)
+
+
+
+def token_usage_from_chunk_usage(chunk_usage: Any) -> TokenUsage | None:
+    return _token_usage_from_chunk_usage(chunk_usage)
+
 
 
 def _messages_to_log_data(messages: list[ChatMessage]) -> list[dict[str, Any]]:
@@ -407,19 +493,16 @@ class StreamService:
                 )
                 # 处理 Token 使用
                 if chunk.usage:
-                    usage = TokenUsage(
-                        prompt_tokens=chunk.usage.prompt_tokens,
-                        completion_tokens=chunk.usage.completion_tokens,
-                        total_tokens=chunk.usage.total_tokens,
-                    )
-                    emit_callback(
-                        {
-                            "type": "tokens",
-                            "total": usage.total_tokens,
-                            "prompt": usage.prompt_tokens,
-                            "completion": usage.completion_tokens,
-                        }
-                    )
+                    usage = _token_usage_from_chunk_usage(chunk.usage)
+                    if usage is not None:
+                        emit_callback(
+                            {
+                                "type": "tokens",
+                                "total": usage.total_tokens,
+                                "prompt": usage.prompt_tokens,
+                                "completion": usage.completion_tokens,
+                            }
+                        )
 
                 # 处理内容块
                 if chunk.content:
@@ -494,7 +577,6 @@ class StreamService:
         """
         full_content = ""
         full_thinking = ""
-        all_tool_calls: list[dict] = []
         usage = None
         chunk_count = 0
         started_at = time.perf_counter()
@@ -516,11 +598,7 @@ class StreamService:
                 full_thinking += chunk.thinking
 
                 if chunk.usage:
-                    usage = TokenUsage(
-                        prompt_tokens=chunk.usage.prompt_tokens,
-                        completion_tokens=chunk.usage.completion_tokens,
-                        total_tokens=chunk.usage.total_tokens,
-                    )
+                    usage = _token_usage_from_chunk_usage(chunk.usage)
 
                 if chunk.is_complete:
                     break
@@ -552,10 +630,139 @@ class StreamService:
         return ChatResponse(
             content=full_content,
             thinking=full_thinking,
-            tool_calls=all_tool_calls,
+            tool_calls=_normalize_aggregated_tool_calls(tool_call_state),
             usage=usage,
             model=self.provider.model_name,
         )
+
+    def stream_runtime(
+        self,
+        messages: list[ChatMessage],
+        should_stop: Callable[[], bool] | None = None,
+        **kwargs,
+    ) -> Iterator[dict[str, Any]]:
+        """执行流式请求并产出 canonical runtime 事件。"""
+        usage = None
+        chunk_count = 0
+        full_content = ""
+        full_thinking = ""
+        started_at = time.perf_counter()
+        tool_call_state: dict[int, dict[str, Any]] = {}
+        started_tool_calls: set[int] = set()
+        completed_tool_calls: set[int] = set()
+        self._log_stream_started(operation="stream_runtime", messages=messages, kwargs=kwargs)
+
+        try:
+            for chunk in self.provider.stream_chat(messages, **kwargs):
+                if should_stop and should_stop():
+                    yield {"event_type": "interrupt_ack", "payload": {}}
+                    return
+
+                chunk_count += 1
+                self._log_stream_chunk(
+                    operation="stream_runtime",
+                    kwargs=kwargs,
+                    chunk=chunk,
+                    chunk_index=chunk_count,
+                    started_at=started_at,
+                    tool_call_state=tool_call_state,
+                )
+
+                if chunk.usage:
+                    usage = chunk.usage
+                    yield {
+                        "event_type": "usage_updated",
+                        "payload": {
+                            "usage": {
+                                "prompt_tokens": int(chunk.usage.prompt_tokens or 0),
+                                "completion_tokens": int(chunk.usage.completion_tokens or 0),
+                                "total_tokens": int(chunk.usage.total_tokens or 0),
+                            }
+                        },
+                    }
+
+                if chunk.tool_calls:
+                    for tool_call in chunk.tool_calls:
+                        tool_call_index = int(getattr(tool_call, "index", 0) or 0)
+                        aggregated = normalize_tool_call(
+                            tool_call_state.get(tool_call_index, {}),
+                            index=tool_call_index,
+                        )
+                        if tool_call_index not in started_tool_calls:
+                            started_tool_calls.add(tool_call_index)
+                            yield {
+                                "event_type": "tool_call_started",
+                                "payload": aggregated,
+                            }
+                        if getattr(tool_call, "function_arguments", None):
+                            yield {
+                                "event_type": "tool_call_argument_delta",
+                                "payload": {
+                                    **aggregated,
+                                    "delta": tool_call.function_arguments,
+                                },
+                            }
+
+                if chunk.content:
+                    full_content += chunk.content
+                    yield {
+                        "event_type": "content_delta",
+                        "payload": {"content": chunk.content},
+                    }
+
+                if chunk.thinking:
+                    full_thinking += chunk.thinking
+                    yield {
+                        "event_type": "reasoning_delta",
+                        "payload": {"content": chunk.thinking},
+                    }
+
+                if chunk.is_complete:
+                    break
+        except Exception as e:
+            self._log_stream_error(
+                operation="stream_runtime",
+                kwargs=kwargs,
+                started_at=started_at,
+                chunk_count=chunk_count,
+                full_content=full_content,
+                full_thinking=full_thinking,
+                usage=usage,
+                tool_call_state=tool_call_state,
+                error=e,
+            )
+            raise
+
+        aggregated_tool_calls = _normalize_aggregated_tool_calls(tool_call_state)
+        for tool_call in aggregated_tool_calls:
+            tool_call_index = int(tool_call.get("index", 0) or 0)
+            if tool_call_index not in completed_tool_calls:
+                completed_tool_calls.add(tool_call_index)
+                yield {
+                    "event_type": "tool_call_completed",
+                    "payload": dict(tool_call),
+                }
+
+        self._log_stream_completed(
+            operation="stream_runtime",
+            kwargs=kwargs,
+            started_at=started_at,
+            chunk_count=chunk_count,
+            full_content=full_content,
+            full_thinking=full_thinking,
+            usage=usage,
+            tool_call_state=tool_call_state,
+        )
+
+        yield {
+            "event_type": "message_completed",
+            "payload": {
+                "content": full_content,
+                "reasoning": full_thinking,
+                "usage": usage_to_log_data(usage),
+                "tool_calls": aggregated_tool_calls,
+            },
+        }
 
     def stream_iter(
         self,
@@ -725,4 +932,11 @@ class StreamService:
         return prompt_tokens, completion_tokens
 
 
-__all__ = ["StreamService"]
+__all__ = [
+    "StreamService",
+    "build_tool_kwargs",
+    "merge_tool_call_state",
+    "normalized_tool_calls",
+    "supports_structured_tool_calling",
+    "token_usage_from_chunk_usage",
+]

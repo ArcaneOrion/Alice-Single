@@ -142,7 +142,7 @@ class TestMemoryIntegration:
         assert sample_round_entries[1].user_input == "Tell me a joke"
 
     @pytest.mark.integration
-    def test_memory_with_timestamps(self):
+    def test_memory_with_timestamps(self, sample_memory_entries):
         """测试带时间戳的内存"""
         entry1 = sample_memory_entries[0]
         entry2 = sample_memory_entries[1]
@@ -353,6 +353,110 @@ class TestEndToEndScenarios:
         # 执行成功的命令
         result = mock_docker_executor.execute("echo test")
         assert result.success is True
+
+
+# ============================================================================
+# 结构化 runtime / tool calling 回归测试
+# ============================================================================
+
+class TestStructuredRuntimeIntegration:
+    """结构化 runtime 与 typed tool calling 回归测试"""
+
+    @pytest.mark.integration
+    def test_chat_service_sets_runtime_context_on_system_message(self):
+        """测试 ChatService 将 runtime context 注入系统消息而非伪 user 消息"""
+        from backend.alice.domain.llm.services.chat_service import ChatService
+
+        provider = MagicMock()
+        chat_service = ChatService(provider=provider, system_prompt="You are Alice")
+
+        runtime_context = chat_service.set_runtime_context({
+            "memory": {
+                "working": "working notes",
+                "short_term": "",
+                "long_term": "long term memory",
+            },
+            "skills": {
+                "summary": "toolkit, memory",
+            },
+        })
+
+        assert runtime_context["memory"]["working"] == "working notes"
+        assert chat_service.messages[0].role == "system"
+        assert "<runtime_context>" in chat_service.messages[0].content
+        assert '"working": "working notes"' in chat_service.messages[0].content
+        assert '"long_term": "long term memory"' in chat_service.messages[0].content
+        assert '"summary": "toolkit, memory"' in chat_service.messages[0].content
+        assert '"short_term"' not in chat_service.messages[0].content
+
+    @pytest.mark.integration
+    def test_orchestration_refresh_context_uses_runtime_context(self):
+        """测试编排层刷新上下文时不再伪造记忆 user message"""
+        from backend.alice.application.services.orchestration_service import OrchestrationService
+        from backend.alice.domain.execution.services.tool_registry import ToolRegistry
+        from backend.alice.domain.llm.services.chat_service import ChatService
+
+        provider = MagicMock()
+        chat_service = ChatService(provider=provider, system_prompt="You are Alice")
+        chat_service.add_user_message("hello")
+
+        memory_manager = MagicMock()
+        memory_manager.get_working_content.return_value = "working memory"
+        memory_manager.get_stm_content.return_value = "short term memory"
+        memory_manager.get_ltm_content.return_value = "long term memory"
+
+        skill_registry = MagicMock()
+        skill_registry.list_skills_summary.return_value = "toolkit, memory"
+        skill_registry.get_all_skills.return_value = {}
+        tool_registry = ToolRegistry(skill_registry=skill_registry)
+
+        orchestration = OrchestrationService(
+            memory_manager=memory_manager,
+            chat_service=chat_service,
+            skill_registry=skill_registry,
+            tool_registry=tool_registry,
+        )
+
+        orchestration.refresh_context()
+
+        messages = chat_service.messages
+        assert len(messages) == 2
+        assert messages[0].role == "system"
+        assert messages[1].role == "user"
+        assert messages[1].content == "hello"
+        assert "【记忆与背景信息注入】" not in messages[1].content
+        assert '"working": "working memory"' in messages[0].content
+        assert '"short_term": "short term memory"' in messages[0].content
+        assert '"long_term": "long term memory"' in messages[0].content
+        assert '"summary": "toolkit, memory"' in messages[0].content
+        assert '"builtin_system_tools"' in messages[0].content
+        assert '"terminal_commands"' in messages[0].content
+        assert '"code_execution"' in messages[0].content
+        assert orchestration.runtime_context["tools"]["builtin_system_tools"]
+        assert orchestration.runtime_context["tools"]["terminal_commands"][0]["tool_id"] == "run_bash"
+        assert orchestration.runtime_context["tools"]["code_execution"][0]["tool_id"] == "run_python"
+
+    @pytest.mark.integration
+    def test_execution_service_exposes_execute_tool_invocation_alias(self):
+        """测试 ExecutionService 暴露 execute_tool_invocation 兼容入口"""
+        from backend.alice.domain.execution.models.tool_calling import ToolInvocation
+        from backend.alice.domain.execution.services.execution_service import ExecutionService
+
+        executor = MagicMock()
+        service = ExecutionService(executor=executor)
+        expected = MagicMock()
+        service.execute_tool_call = Mock(return_value=expected)
+
+        invocation = ToolInvocation(
+            id="call_1",
+            name="run_bash",
+            arguments='{"command": "echo test"}',
+        )
+
+        result = service.execute_tool_invocation(invocation, log_context={"trace_id": "t1"})
+
+        assert result is expected
+        service.execute_tool_call.assert_called_once_with(invocation, log_context={"trace_id": "t1"})
 
 
 __all__ = []
