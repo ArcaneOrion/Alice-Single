@@ -4,12 +4,16 @@
 协调 Domain 层的各个服务，提供统一的应用层接口。
 """
 
+from __future__ import annotations
+
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from backend.alice.application.runtime import RuntimeContextBuilder
-from backend.alice.application.workflow.function_calling_orchestrator import FunctionCallingOrchestrator
+
+if TYPE_CHECKING:
+    from backend.alice.application.workflow.function_calling_orchestrator import FunctionCallingOrchestrator
 from backend.alice.domain.memory.services.memory_manager import MemoryManager
 from backend.alice.domain.execution.services.execution_service import ExecutionService
 from backend.alice.domain.execution.services.tool_registry import ToolRegistry

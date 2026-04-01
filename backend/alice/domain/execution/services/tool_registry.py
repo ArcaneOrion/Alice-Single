@@ -53,6 +53,9 @@ class ToolRegistry:
             ),
         }
 
+    def set_skill_registry(self, skill_registry: SkillRegistry | None) -> None:
+        self.skill_registry = skill_registry
+
     def list_tools(self) -> list[ToolSchemaDefinition]:
         return list(self._tools.values())
 

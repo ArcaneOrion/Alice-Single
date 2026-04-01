@@ -147,7 +147,6 @@ class TUIBridge:
                 ChatWorkflow(
                     chat_service=orchestration.chat_service,
                     execution_service=orchestration.execution_service,
-                    stream_service=orchestration.stream_service,
                     tool_registry=orchestration.tool_registry,
                     function_calling_orchestrator=orchestration.function_calling_orchestrator,
                 )
