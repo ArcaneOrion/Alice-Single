@@ -117,17 +117,18 @@ def _supports_structured_tool_calling(provider: BaseLLMProvider) -> bool:
 
 
 def build_tool_kwargs(provider: BaseLLMProvider, tools: list[dict], metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    request_kwargs: dict[str, Any] = {}
+    if metadata:
+        request_kwargs["metadata"] = dict(metadata)
     if not tools:
-        return {}
+        return request_kwargs
     if not _supports_structured_tool_calling(provider):
         model_name = getattr(provider, "model_name", "") or ""
         raise ValueError(f"当前模型不支持结构化 tool calling: {model_name}")
-    request_kwargs: dict[str, Any] = {
+    request_kwargs.update({
         "tools": tools,
         "tool_choice": "auto",
-    }
-    if metadata:
-        request_kwargs["metadata"] = dict(metadata)
+    })
     return request_kwargs
 
 

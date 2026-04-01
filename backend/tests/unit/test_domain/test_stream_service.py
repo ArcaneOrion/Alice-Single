@@ -5,7 +5,7 @@ import pytest
 from backend.alice.domain.llm.models.message import ChatMessage
 from backend.alice.domain.llm.models.stream_chunk import StreamChunk, TokenUsageUpdate, ToolCallDelta
 from backend.alice.domain.llm.providers.base import BaseLLMProvider
-from backend.alice.domain.llm.services.stream_service import StreamService
+from backend.alice.domain.llm.services.stream_service import StreamService, build_tool_kwargs
 
 
 class _RuntimeStreamProvider(BaseLLMProvider):
@@ -40,6 +40,20 @@ class _RuntimeStreamProvider(BaseLLMProvider):
     def _extract_stream_chunks(self, response):
         _ = response
         yield from self._chunks
+
+
+@pytest.mark.unit
+def test_build_tool_kwargs_preserves_metadata_without_tools() -> None:
+    provider = _RuntimeStreamProvider()
+
+    kwargs = build_tool_kwargs(provider, [], metadata={"request_id": "req-1", "trace_id": "trace-1"})
+
+    assert kwargs == {
+        "metadata": {
+            "request_id": "req-1",
+            "trace_id": "trace-1",
+        }
+    }
 
 
 @pytest.mark.unit
