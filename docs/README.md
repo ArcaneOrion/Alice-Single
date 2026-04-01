@@ -30,6 +30,14 @@
 - [代码地图-结构视图](./reference/code-map-structure.md)
 - [代码地图-耦合视图](./reference/code-map-coupling.md)
 
+### 想修改 Runtime Context / Tool Registry / 工具调用编排
+- [代码地图总览](./reference/code-map.md)
+- [代码地图-结构视图](./reference/code-map-structure.md)
+- [代码地图-耦合视图](./reference/code-map-coupling.md)
+- `backend/alice/application/runtime/`
+- `backend/alice/application/workflow/function_calling_orchestrator.py`
+- `backend/alice/domain/execution/services/tool_registry.py`
+
 ### 想跑测试或补测试
 - [测试指南](./testing/guide.md)
 

@@ -5,10 +5,14 @@ Workflow Protocol
 """
 
 from abc import ABC, abstractmethod
-from typing import Iterator, Optional
+from typing import Any, Iterator
 from dataclasses import dataclass
 
 from ..dto import ApplicationResponse, RequestContext
+from ..runtime import RuntimeContext
+
+
+RuntimeContextPayload = RuntimeContext
 
 
 @dataclass
@@ -29,7 +33,8 @@ class WorkflowContext:
     user_input: str
     messages: list
     interrupted: bool = False
-    metadata: dict = None
+    metadata: dict[str, Any] | None = None
+    runtime_context: RuntimeContextPayload | None = None
 
     def __init__(
         self,
@@ -38,12 +43,14 @@ class WorkflowContext:
         messages: list | None = None,
         interrupted: bool = False,
         metadata: dict | None = None,
+        runtime_context: RuntimeContextPayload | None = None,
     ):
         self.request_context = request_context
         self.user_input = user_input
         self.messages = messages or []
         self.interrupted = interrupted
         self.metadata = metadata or {}
+        self.runtime_context = runtime_context
 
 
 class Workflow(ABC):

@@ -8,9 +8,14 @@ import logging
 from pathlib import Path
 from typing import Optional
 
+from backend.alice.application.runtime import RuntimeContextBuilder
+from backend.alice.application.workflow.function_calling_orchestrator import FunctionCallingOrchestrator
 from backend.alice.domain.memory.services.memory_manager import MemoryManager
 from backend.alice.domain.execution.services.execution_service import ExecutionService
+from backend.alice.domain.execution.services.tool_registry import ToolRegistry
 from backend.alice.domain.llm.services.chat_service import ChatService
+from backend.alice.domain.llm.services.stream_service import StreamService
+from backend.alice.domain.skills.services.skill_cache import SkillCache
 from backend.alice.domain.skills.services.skill_registry import SkillRegistry
 from backend.alice.domain.llm.providers.openai_provider import OpenAIProvider, OpenAIConfig
 
@@ -29,8 +34,11 @@ class OrchestrationService:
         memory_manager: Optional[MemoryManager] = None,
         execution_service: Optional[ExecutionService] = None,
         chat_service: Optional[ChatService] = None,
+        stream_service: Optional[StreamService] = None,
         skill_registry: Optional[SkillRegistry] = None,
         llm_provider: Optional[OpenAIProvider] = None,
+        tool_registry: Optional[ToolRegistry] = None,
+        function_calling_orchestrator: FunctionCallingOrchestrator | None = None,
     ):
         """初始化编排服务
 
@@ -41,11 +49,16 @@ class OrchestrationService:
             skill_registry: 技能注册表
             llm_provider: LLM 提供商
         """
-        self.memory_manager = memory_manager
-        self.execution_service = execution_service
-        self.chat_service = chat_service
-        self.skill_registry = skill_registry
-        self.llm_provider = llm_provider
+        self.memory_manager: Optional[MemoryManager] = memory_manager
+        self.execution_service: Optional[ExecutionService] = execution_service
+        self.chat_service: Optional[ChatService] = chat_service
+        self.stream_service: Optional[StreamService] = stream_service
+        self.skill_registry: Optional[SkillRegistry] = skill_registry
+        self.llm_provider: Optional[OpenAIProvider] = llm_provider
+        self.tool_registry: Optional[ToolRegistry] = tool_registry
+        self.function_calling_orchestrator: Optional[FunctionCallingOrchestrator] = function_calling_orchestrator
+        self.runtime_context_builder = RuntimeContextBuilder()
+        self.runtime_context: dict[str, object] = {}
 
     @classmethod
     def create_from_config(
@@ -63,6 +76,7 @@ class OrchestrationService:
         stm_days_to_keep: int = 7,
         extra_headers: dict | None = None,
         request_header_profiles: list[dict] | None = None,
+        _todo_path: str | None = None,
     ) -> "OrchestrationService":
         """从配置创建编排服务
 
@@ -84,6 +98,8 @@ class OrchestrationService:
         Returns:
             编排服务实例
         """
+        _ = todo_path, _todo_path
+
         # 创建 LLM Provider
         llm_config = OpenAIConfig(
             api_key=api_key,
@@ -133,19 +149,27 @@ class OrchestrationService:
             system_prompt=system_prompt,
             max_history=50,
         )
+        stream_service = StreamService(provider=llm_provider)
+
+        tool_registry = ToolRegistry(skill_registry)
+        function_calling_orchestrator = FunctionCallingOrchestrator(
+            execution_service=execution_service,
+            tool_registry=tool_registry,
+        )
 
         # 创建编排服务
         orchestration = cls(
             memory_manager=memory_manager,
             execution_service=execution_service,
             chat_service=chat_service,
+            stream_service=stream_service,
             skill_registry=skill_registry,
             llm_provider=llm_provider,
+            tool_registry=tool_registry,
+            function_calling_orchestrator=function_calling_orchestrator,
         )
 
-        # 设置 snapshot manager 到 execution service
-        # (创建一个简单的适配器)
-        execution_service.snapshot_manager = _SkillSnapshotAdapter(skill_registry)
+        execution_service.set_skill_snapshot(skill_registry, SkillCache())
 
         return orchestration
 
@@ -168,72 +192,24 @@ class OrchestrationService:
         return "你是一个 AI 助手。"
 
     def refresh_context(self) -> None:
-        """刷新对话上下文
-
-        重新加载内存和技能信息到上下文中。
-        """
+        """刷新结构化运行时上下文，不污染持久消息历史。"""
         if not self.chat_service:
             return
 
-        # 构建记忆上下文
-        memory_context_parts = []
+        runtime_context = self.runtime_context_builder.build(
+            system_prompt=self.chat_service.system_prompt,
+            current_question="",
+            messages=self.chat_service.messages,
+            request_metadata={},
+            memory_manager=self.memory_manager,
+            skill_registry=self.skill_registry,
+            tool_registry=self.tool_registry,
+        )
+        self.runtime_context = runtime_context.to_dict()
 
-        if self.memory_manager:
-            working_content = self.memory_manager.get_working_content()
-            stm_content = self.memory_manager.get_stm_content()
-            ltm_content = self.memory_manager.get_ltm_content()
-
-            if working_content:
-                memory_context_parts.append(f"### 即时对话背景\n{working_content}")
-            if stm_content:
-                memory_context_parts.append(f"### 短期记忆\n{stm_content}")
-            if ltm_content:
-                memory_context_parts.append(f"### 长期记忆\n{ltm_content}")
-
-        # 构建技能索引
-        if self.skill_registry:
-            skills_summary = self.skill_registry.list_skills_summary()
-            memory_context_parts.append(f"### 技能索引\n{skills_summary}")
-
-        if memory_context_parts:
-            memory_context = "【记忆与背景信息注入】\n\n" + "\n\n".join(memory_context_parts)
-
-            # 更新聊天服务的消息历史
-            # 保持最新的消息，添加内存上下文
-            messages = self.chat_service.messages
-            if len(messages) > 0:
-                # 保留系统消息
-                system_msg = None
-                if messages and messages[0].role == "system":
-                    system_msg = messages[0]
-
-                # 保留最近的消息
-                recent_messages = [m for m in messages if m.role != "system"][-4:]
-
-                # 重建消息列表
-                self.chat_service.clear_history(keep_system=False)
-                if system_msg:
-                    self.chat_service.add_message(system_msg)
-                self.chat_service.add_user_message(memory_context)
-                for msg in recent_messages:
-                    self.chat_service.add_message(msg)
-
-
-class _SkillSnapshotAdapter:
-    """技能快照适配器
-
-    适配 SkillRegistry 到 ExecutionService 需要的 snapshot_manager 接口。
-    """
-
-    def __init__(self, skill_registry: SkillRegistry):
-        self._skill_registry = skill_registry
-
-    def read_skill_file(self, relative_path: str) -> str | None:
-        """读取技能文件"""
-        skill = self._skill_registry.get_skill(relative_path.split("/")[0])
-        if skill:
-            return skill.content
-        return None
+        set_runtime_context = getattr(self.chat_service, "set_runtime_context", None)
+        if callable(set_runtime_context):
+            set_runtime_context(self.runtime_context)
 
 
 __all__ = ["OrchestrationService"]

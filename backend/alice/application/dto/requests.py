@@ -6,7 +6,9 @@
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
+
+from ..runtime import RuntimeContext
 
 
 class RequestType(str, Enum):
@@ -27,12 +29,14 @@ class ChatRequest:
         session_id: 会话 ID（可选）
         enable_thinking: 是否启用思考模式
         stream: 是否使用流式响应
+        metadata: 请求级元数据
     """
 
     input: str
     session_id: Optional[str] = None
     enable_thinking: bool = True
     stream: bool = True
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -91,14 +95,18 @@ class RequestContext:
     @classmethod
     def from_chat_request(cls, request: ChatRequest) -> "RequestContext":
         """从聊天请求创建上下文"""
-        return cls(
-            request_type=RequestType.CHAT,
-            user_input=request.input,
-            metadata={
+        metadata = dict(request.metadata or {})
+        metadata.update(
+            {
                 "session_id": request.session_id,
                 "enable_thinking": request.enable_thinking,
                 "stream": request.stream,
-            },
+            }
+        )
+        return cls(
+            request_type=RequestType.CHAT,
+            user_input=request.input,
+            metadata=metadata,
         )
 
     @classmethod
@@ -122,12 +130,16 @@ class WorkflowContext:
         user_input: 用户输入
         messages: 消息历史
         interrupted: 是否被中断
+        metadata: 工作流级元数据
+        runtime_context: 结构化运行时上下文
     """
 
     request_context: RequestContext
     user_input: str
     messages: list = field(default_factory=list)
     interrupted: bool = False
+    metadata: dict[str, Any] = field(default_factory=dict)
+    runtime_context: RuntimeContext | None = None
 
 
 __all__ = [

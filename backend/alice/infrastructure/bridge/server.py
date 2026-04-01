@@ -11,12 +11,19 @@ import os
 import traceback
 from typing import TYPE_CHECKING, Any, Optional, Type
 
+from .legacy_compatibility_serializer import (
+    serialize_error_message,
+    serialize_status_message,
+    serialize_thinking_message,
+    serialize_content_message,
+    serialize_tokens_message,
+)
 from .protocol import (
     StatusType,
     OutputMessage,
     INTERRUPT_SIGNAL,
 )
-from .transport import StdioTransport
+from .transport import StdioTransport, TransportProtocol
 from .stream_manager import StreamManager
 from .event_handlers import MessageHandler, InterruptHandler
 
@@ -72,23 +79,56 @@ def _summarize_frontend_message(message: str) -> dict[str, Any]:
     }
 
 
+def _normalize_output_message(message: Any) -> OutputMessage | Any:
+    """将 bridge 输出统一收口到 legacy compatibility serializer。"""
+    if not isinstance(message, dict):
+        return message
+
+    raw_type = message.get("type", "")
+    message_type = getattr(raw_type, "value", raw_type)
+
+    if message_type == "status":
+        raw_status = message.get("content", "")
+        status = getattr(raw_status, "value", raw_status)
+        return serialize_status_message(str(status))
+    if message_type == "thinking":
+        return serialize_thinking_message(str(message.get("content", "")))
+    if message_type == "content":
+        return serialize_content_message(str(message.get("content", "")))
+    if message_type == "tokens":
+        return serialize_tokens_message(
+            total=int(message.get("total", 0) or 0),
+            prompt=int(message.get("prompt", 0) or 0),
+            completion=int(message.get("completion", 0) or 0),
+        )
+    if message_type == "error":
+        return serialize_error_message(
+            content=str(message.get("content", "")),
+            code=str(message.get("code", "") or ""),
+        )
+
+    return message
+
+
 def _summarize_output_message(message: OutputMessage) -> dict[str, Any]:
     """提取输出消息元信息。"""
+    normalized_message = _normalize_output_message(message)
     msg_type = "unknown"
     content_summary = ""
     content_length = 0
 
-    if isinstance(message, dict):
-        msg_type = str(message.get("type", "unknown"))
-        content = message.get("content")
+    if isinstance(normalized_message, dict):
+        raw_type = normalized_message.get("type", "unknown")
+        msg_type = str(getattr(raw_type, "value", raw_type))
+        content = normalized_message.get("content")
         if isinstance(content, str):
             content_length = len(content)
             content_summary = _summarize_text(content)
 
     try:
-        payload_length = len(json.dumps(message, ensure_ascii=False))
+        payload_length = len(json.dumps(normalized_message, ensure_ascii=False))
     except TypeError:
-        payload_length = len(str(message))
+        payload_length = len(str(normalized_message))
 
     return {
         "direction": "backend->frontend",
@@ -97,6 +137,11 @@ def _summarize_output_message(message: OutputMessage) -> dict[str, Any]:
         "content_length": content_length,
         "message_summary": content_summary,
     }
+
+
+def _write_stdout_message(message: OutputMessage) -> None:
+    """直接向 stdout 输出归一化后的 legacy 协议消息。"""
+    print(json.dumps(_normalize_output_message(message), ensure_ascii=False), flush=True)
 
 
 # 默认的 StreamManager 类（允许外部注入替代实现）
@@ -123,7 +168,7 @@ class BridgeServer:
     def __init__(
         self,
         agent: Optional["AliceAgent"] = None,
-        transport: Optional[StdioTransport] = None,
+        transport: Optional[TransportProtocol] = None,
         stream_manager_class: Type[StreamManager] = DefaultStreamManagerClass,
     ):
         self.agent = agent
@@ -232,7 +277,9 @@ class BridgeServer:
 
     def send_raw_message(self, message: OutputMessage) -> None:
         """
-        发送原始消息到前端（不经过编解码器）。
+        发送消息到前端，并保留 raw 路径日志标记。
+
+        该方法仍会经过 legacy compatibility serializer，不能绕过兼容层。
 
         Args:
             message: 消息字典
@@ -241,14 +288,16 @@ class BridgeServer:
 
     def _send_message_with_logging(self, message: OutputMessage, *, raw: bool) -> None:
         """发送消息并记录结构化可观测日志。"""
-        message_data = _summarize_output_message(message)
+        normalized_message = _normalize_output_message(message)
+        message_data = _summarize_output_message(normalized_message)
         message_data["raw"] = raw
+        message_data["normalized"] = normalized_message != message
         logger.info(
             "Bridge message sent",
             extra=_bridge_log_extra("bridge.message_sent", data=message_data),
         )
         try:
-            self.transport.send_message(message)
+            self.transport.send_message(normalized_message)
         except Exception as e:
             logger.error(
                 "Bridge transport send failed",
@@ -276,7 +325,7 @@ class BridgeServer:
         """
         if isinstance(status, str):
             status = StatusType(status)
-        self.send_message({"type": "status", "content": status.value})
+        self.send_message(serialize_status_message(status.value))
 
     def send_thinking(self, content: str) -> None:
         """
@@ -285,7 +334,7 @@ class BridgeServer:
         Args:
             content: 思考内容
         """
-        self.send_message({"type": "thinking", "content": content})
+        self.send_message(serialize_thinking_message(content))
 
     def send_content(self, content: str) -> None:
         """
@@ -294,7 +343,7 @@ class BridgeServer:
         Args:
             content: 正文内容
         """
-        self.send_message({"type": "content", "content": content})
+        self.send_message(serialize_content_message(content))
 
     def send_tokens(self, total: int, prompt: int, completion: int) -> None:
         """
@@ -305,12 +354,7 @@ class BridgeServer:
             prompt: 提示词 token 数
             completion: 补全 token 数
         """
-        self.send_message({
-            "type": "tokens",
-            "total": total,
-            "prompt": prompt,
-            "completion": completion
-        })
+        self.send_message(serialize_tokens_message(total=total, prompt=prompt, completion=completion))
 
     def send_error(self, content: str, code: str = "") -> None:
         """
@@ -332,7 +376,7 @@ class BridgeServer:
                 },
             ),
         )
-        self.send_message({"type": "error", "content": content, "code": code})
+        self.send_message(serialize_error_message(content=content, code=code))
 
     # ========== 传输层回调 ==========
 
@@ -478,10 +522,9 @@ def main_with_agent(agent_class=None, **agent_kwargs) -> None:
                 },
             ),
         )
-        print(json.dumps({
-            "type": "error",
-            "content": f"Initialization failed: {str(e)}"
-        }), flush=True)
+        _write_stdout_message(
+            serialize_error_message(content=f"Initialization failed: {str(e)}")
+        )
         return
 
     # 创建并运行服务器
@@ -518,10 +561,9 @@ def main_with_agent(agent_class=None, **agent_kwargs) -> None:
                 },
             ),
         )
-        print(json.dumps({
-            "type": "error",
-            "content": f"Runtime Error: {str(e)}. 请查看日志输出。"
-        }), flush=True)
+        _write_stdout_message(
+            serialize_error_message(content=f"Runtime Error: {str(e)}. 请查看日志输出。")
+        )
     finally:
         logger.info(
             "Bridge runtime shutdown",

@@ -57,7 +57,11 @@ class InterruptHandler:
         """
         # 检查待处理的中断信号
         try:
-            found = self.server.transport.drain_pending_interrupts()
+            drain_pending_interrupts = getattr(self.server.transport, "drain_pending_interrupts", None)
+            if not callable(drain_pending_interrupts):
+                return False
+
+            found = drain_pending_interrupts()
             if found:
                 self._interrupt_count += 1
                 logger.info(
@@ -72,10 +76,10 @@ class InterruptHandler:
                     ),
                 )
 
-                # 设置 Agent 中断状态
+                # 传播中断到当前 Agent
                 agent = self.server.agent
                 if agent:
-                    agent.interrupted = True
+                    agent.interrupt()
 
                 return True
 
@@ -97,9 +101,6 @@ class InterruptHandler:
 
     def reset_interrupt(self) -> None:
         """重置中断状态。"""
-        agent = self.server.agent
-        if agent:
-            agent.interrupted = False
         logger.info(
             "Interrupt state reset",
             extra=_interrupt_log_extra(

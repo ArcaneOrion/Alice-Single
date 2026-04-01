@@ -4,6 +4,7 @@
 """
 
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,52 @@ class TokenUsage:
             "completion_tokens": self.completion_tokens,
             "total_tokens": self.total_tokens,
         }
+
+
+def normalize_tool_call(tool_call: Any, index: int = 0) -> dict:
+    """归一化 tool_call 结构。"""
+    if tool_call is None:
+        return {
+            "id": "",
+            "type": "function",
+            "index": index,
+            "function": {"name": "", "arguments": ""},
+        }
+
+    if hasattr(tool_call, "model_dump"):
+        tool_call = tool_call.model_dump()
+
+    function = getattr(tool_call, "function", None)
+    if function is None and isinstance(tool_call, dict):
+        function = tool_call.get("function") or {}
+
+    if function is not None and hasattr(function, "model_dump"):
+        function = function.model_dump()
+
+    function_name = ""
+    function_arguments = ""
+    if isinstance(function, dict):
+        fallback_name = tool_call.get("function_name", "") if isinstance(tool_call, dict) else ""
+        fallback_arguments = tool_call.get("function_arguments", "") if isinstance(tool_call, dict) else ""
+        function_name = function.get("name", "") or fallback_name
+        function_arguments = function.get("arguments", "") or fallback_arguments
+    else:
+        function_name = getattr(function, "name", "") or getattr(tool_call, "function_name", "")
+        function_arguments = getattr(function, "arguments", "") or getattr(tool_call, "function_arguments", "")
+
+    tool_call_id = tool_call.get("id") if isinstance(tool_call, dict) else getattr(tool_call, "id", "")
+    tool_call_type = tool_call.get("type") if isinstance(tool_call, dict) else getattr(tool_call, "type", None)
+    tool_call_index = tool_call.get("index") if isinstance(tool_call, dict) else getattr(tool_call, "index", index)
+
+    return {
+        "id": str(tool_call_id or ""),
+        "type": str(tool_call_type or "function"),
+        "index": int(tool_call_index or 0),
+        "function": {
+            "name": str(function_name or ""),
+            "arguments": str(function_arguments or ""),
+        },
+    }
 
 
 @dataclass(frozen=True)
@@ -74,7 +121,10 @@ class ChatResponse:
 
         if message:
             content = getattr(message, "content", "") or ""
-            tool_calls = getattr(message, "tool_calls", None) or []
+            tool_calls = [
+                normalize_tool_call(tool_call, index=index)
+                for index, tool_call in enumerate(getattr(message, "tool_calls", None) or [])
+            ]
 
             # 尝试提取思考内容
             thinking_fields = [
@@ -125,4 +175,4 @@ class ChatResponse:
         return result
 
 
-__all__ = ["ChatResponse", "TokenUsage"]
+__all__ = ["ChatResponse", "TokenUsage", "normalize_tool_call"]

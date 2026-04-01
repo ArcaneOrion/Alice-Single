@@ -29,10 +29,14 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", line_bufferin
 from backend.alice.application.agent import AliceAgent
 from backend.alice.application.services import OrchestrationService, LifecycleService
 from backend.alice.application.workflow import WorkflowChain, ChatWorkflow
-from backend.alice.application.dto import RequestContext, ChatRequest, response_to_dict
+from backend.alice.application.dto import response_to_dict
 from backend.alice.core.config.loader import load_config
 from backend.alice.core.logging import configure_logging
 from backend.alice.domain.llm.providers.openai_provider import resolve_request_header_profiles
+from backend.alice.infrastructure.bridge.legacy_compatibility_serializer import (
+    serialize_error_message,
+    serialize_status_message,
+)
 from backend.alice.infrastructure.bridge.protocol.messages import INTERRUPT_SIGNAL
 
 logger = logging.getLogger("AliceCLI")
@@ -143,6 +147,9 @@ class TUIBridge:
                 ChatWorkflow(
                     chat_service=orchestration.chat_service,
                     execution_service=orchestration.execution_service,
+                    stream_service=orchestration.stream_service,
+                    tool_registry=orchestration.tool_registry,
+                    function_calling_orchestrator=orchestration.function_calling_orchestrator,
                 )
             )
 
@@ -213,13 +220,19 @@ class TUIBridge:
         Args:
             user_input: 用户输入内容
         """
+        if self.agent is None:
+            self._send_error("Agent not initialized")
+            return
+
+        agent = self.agent
+
         # 检查中断信号
         interrupted = False
         while not self.input_queue.empty():
             msg = self.input_queue.get_nowait()
             if msg == INTERRUPT_SIGNAL:
                 logger.info("检测到中断信号")
-                self.agent.interrupt()
+                agent.interrupt()
                 interrupted = True
                 break
 
@@ -229,12 +242,12 @@ class TUIBridge:
 
         # 创建请求并处理
         try:
-            for response in self.agent.chat(user_input):
+            for response in agent.chat(user_input):
                 # 检查中断
                 while not self.input_queue.empty():
                     msg = self.input_queue.get_nowait()
                     if msg == INTERRUPT_SIGNAL:
-                        self.agent.interrupt()
+                        agent.interrupt()
                         self._send_status("done")
                         return
 
@@ -253,6 +266,8 @@ class TUIBridge:
         """
         try:
             data = response_to_dict(response)
+            if data is None:
+                return
             print(json.dumps(data), flush=True)
         except Exception as e:
             logger.error(f"发送响应失败: {e}")
@@ -264,7 +279,7 @@ class TUIBridge:
             status: 状态字符串
         """
         try:
-            print(json.dumps({"type": "status", "content": status}), flush=True)
+            print(json.dumps(serialize_status_message(status)), flush=True)
         except Exception as e:
             logger.error(f"发送状态失败: {e}")
 
@@ -276,10 +291,7 @@ class TUIBridge:
             code: 错误代码
         """
         try:
-            msg = {"type": "error", "content": content}
-            if code:
-                msg["code"] = code
-            print(json.dumps(msg), flush=True)
+            print(json.dumps(serialize_error_message(content=content, code=code)), flush=True)
         except Exception as e:
             logger.error(f"发送错误失败: {e}")
 

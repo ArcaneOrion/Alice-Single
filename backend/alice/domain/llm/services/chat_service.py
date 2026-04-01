@@ -3,13 +3,19 @@
 提供高层聊天接口，封装消息管理和上下文维护。
 """
 
+import json
 import logging
-from typing import Iterator, Callable, Any
+from typing import Any, Callable
 
 from backend.alice.domain.llm.models.message import ChatMessage
 from backend.alice.domain.llm.models.response import ChatResponse
 from backend.alice.domain.llm.models.stream_chunk import StreamChunk
 from backend.alice.domain.llm.providers.base import BaseLLMProvider
+from backend.alice.domain.llm.services.stream_service import (
+    merge_tool_call_state,
+    normalized_tool_calls,
+    token_usage_from_chunk_usage,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -34,13 +40,11 @@ class ChatService:
             max_history: 最大保留的历史消息数量
         """
         self.provider = provider
-        self.system_prompt = system_prompt
         self.max_history = max_history
+        self._base_system_prompt = system_prompt
+        self._runtime_context: dict[str, Any] = {}
         self._messages: list[ChatMessage] = []
-
-        # 如果有系统提示词，初始化时添加
-        if system_prompt:
-            self._messages.append(ChatMessage.system(system_prompt))
+        self._sync_system_message()
 
     @property
     def messages(self) -> list[ChatMessage]:
@@ -51,6 +55,113 @@ class ChatService:
     def message_count(self) -> int:
         """获取当前消息数量"""
         return len(self._messages)
+
+    @property
+    def system_prompt(self) -> str:
+        """获取基础系统提示词。"""
+        return self._base_system_prompt
+
+    @property
+    def runtime_context(self) -> dict[str, Any]:
+        """获取结构化运行时上下文。"""
+        return dict(self._runtime_context)
+
+    @classmethod
+    def _prune_runtime_context(cls, value: Any) -> Any:
+        """移除空字段，保持运行时上下文紧凑。"""
+        if isinstance(value, dict):
+            cleaned = {}
+            for key, item in value.items():
+                normalized = cls._prune_runtime_context(item)
+                if normalized in (None, "", [], {}):
+                    continue
+                cleaned[key] = normalized
+            return cleaned
+
+        if isinstance(value, list):
+            cleaned_items = []
+            for item in value:
+                normalized = cls._prune_runtime_context(item)
+                if normalized in (None, "", [], {}):
+                    continue
+                cleaned_items.append(normalized)
+            return cleaned_items
+
+        if isinstance(value, str):
+            return value.strip()
+
+        return value
+
+    def _compose_system_prompt(self) -> str:
+        """组合基础系统提示词与结构化运行时上下文。"""
+        base_prompt = (self._base_system_prompt or "").strip()
+        context_payload = self._prune_runtime_context(self._runtime_context)
+        if not context_payload:
+            return base_prompt
+
+        runtime_block = json.dumps(context_payload, ensure_ascii=False, indent=2)
+        if base_prompt:
+            return f"{base_prompt}\n\n<runtime_context>\n{runtime_block}\n</runtime_context>"
+        return f"<runtime_context>\n{runtime_block}\n</runtime_context>"
+
+    def _sync_system_message(self) -> None:
+        """同步系统消息到消息列表首位。"""
+        composed_prompt = self._compose_system_prompt()
+        if composed_prompt:
+            system_message = ChatMessage.system(composed_prompt)
+            if self._messages and self._messages[0].role == "system":
+                self._messages[0] = system_message
+            else:
+                self._messages.insert(0, system_message)
+            return
+
+        if self._messages and self._messages[0].role == "system":
+            self._messages.pop(0)
+
+    def set_runtime_context(self, runtime_context: dict[str, Any] | None) -> dict[str, Any]:
+        """替换运行时上下文。"""
+        normalized = self._prune_runtime_context(runtime_context or {})
+        self._runtime_context = normalized if isinstance(normalized, dict) else {}
+        self._sync_system_message()
+        return self.runtime_context
+
+    def update_runtime_context(self, runtime_context: dict[str, Any] | None) -> dict[str, Any]:
+        """合并运行时上下文。"""
+        merged = {**self._runtime_context}
+        for key, value in (runtime_context or {}).items():
+            if isinstance(value, dict) and isinstance(merged.get(key), dict):
+                merged[key] = {**merged[key], **value}
+            else:
+                merged[key] = value
+        return self.set_runtime_context(merged)
+
+    def build_request_messages(self, runtime_context: dict[str, Any] | None = None) -> list[ChatMessage]:
+        """构造一次性 provider request messages，不污染持久历史。"""
+        if not runtime_context:
+            return list(self._messages)
+
+        composed_prompt = self._compose_system_prompt_for(runtime_context)
+        if not composed_prompt:
+            return list(self._messages)
+
+        request_messages = list(self._messages)
+        system_message = ChatMessage.system(composed_prompt)
+        if request_messages and request_messages[0].role == "system":
+            request_messages[0] = system_message
+        else:
+            request_messages.insert(0, system_message)
+        return request_messages
+
+    def _compose_system_prompt_for(self, runtime_context: dict[str, Any] | None) -> str:
+        base_prompt = (self._base_system_prompt or "").strip()
+        context_payload = self._prune_runtime_context(runtime_context or {})
+        if not context_payload:
+            return base_prompt
+
+        runtime_block = json.dumps(context_payload, ensure_ascii=False, indent=2)
+        if base_prompt:
+            return f"{base_prompt}\n\n<runtime_context>\n{runtime_block}\n</runtime_context>"
+        return f"<runtime_context>\n{runtime_block}\n</runtime_context>"
 
     def add_message(self, message: ChatMessage) -> None:
         """添加消息
@@ -97,13 +208,9 @@ class ChatService:
         Returns:
             创建的消息对象
         """
-        msg = ChatMessage.system(content)
-        # 系统消息总是放在开头
-        if self._messages and self._messages[0].role == "system":
-            self._messages[0] = msg
-        else:
-            self._messages.insert(0, msg)
-        return msg
+        self._base_system_prompt = content
+        self._sync_system_message()
+        return self._messages[0]
 
     def set_system_prompt(self, prompt: str) -> None:
         """设置系统提示词
@@ -111,11 +218,14 @@ class ChatService:
         Args:
             prompt: 新的系统提示词
         """
-        self.system_prompt = prompt
-        if self._messages and self._messages[0].role == "system":
-            self._messages[0] = ChatMessage.system(prompt)
-        else:
-            self._messages.insert(0, ChatMessage.system(prompt))
+        self._base_system_prompt = prompt
+        self._sync_system_message()
+
+    def add_tool_message(self, content: str, tool_call_id: str) -> ChatMessage:
+        """添加工具结果消息。"""
+        msg = ChatMessage.tool(content, tool_call_id)
+        self.add_message(msg)
+        return msg
 
     def clear_history(self, keep_system: bool = True) -> None:
         """清除历史消息
@@ -123,8 +233,9 @@ class ChatService:
         Args:
             keep_system: 是否保留系统消息
         """
-        if keep_system and self._messages and self._messages[0].role == "system":
-            self._messages = [self._messages[0]]
+        if keep_system:
+            composed_prompt = self._compose_system_prompt()
+            self._messages = [ChatMessage.system(composed_prompt)] if composed_prompt else []
         else:
             self._messages = []
 
@@ -133,12 +244,10 @@ class ChatService:
         if len(self._messages) <= self.max_history:
             return
 
-        # 保留系统消息和最近的消息
         system_msg = None
         if self._messages and self._messages[0].role == "system":
             system_msg = self._messages[0]
 
-        # 保留最近的 max_history 条消息（不包括系统消息）
         if system_msg:
             self._messages = [system_msg] + self._messages[-self.max_history :]
         else:
@@ -164,7 +273,6 @@ class ChatService:
 
         response = self.provider.chat(self._messages, **kwargs)
 
-        # 添加助手响应到历史
         self.add_assistant_message(response.content, response.tool_calls)
 
         return response
@@ -189,8 +297,8 @@ class ChatService:
 
         full_content = ""
         full_thinking = ""
-        all_tool_calls: list[dict] = []
         usage = None
+        tool_call_state: dict[int, dict] = {}
 
         for chunk in self.provider.stream_chat(self._messages, **kwargs):
             if on_chunk:
@@ -199,22 +307,23 @@ class ChatService:
             full_content += chunk.content
             full_thinking += chunk.thinking
 
+            if chunk.tool_calls:
+                merge_tool_call_state(tool_call_state, chunk.tool_calls)
+
             if chunk.usage:
-                usage = chunk.usage
+                usage = token_usage_from_chunk_usage(chunk.usage)
 
             if chunk.is_complete:
                 break
 
-        # 构建响应
         response = ChatResponse(
             content=full_content,
             thinking=full_thinking,
-            tool_calls=all_tool_calls,
+            tool_calls=normalized_tool_calls(tool_call_state),
             usage=usage,
             model=self.provider.model_name,
         )
 
-        # 添加助手响应到历史
         self.add_assistant_message(response.content, response.tool_calls)
 
         return response

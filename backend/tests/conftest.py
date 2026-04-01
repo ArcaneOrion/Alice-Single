@@ -90,34 +90,11 @@ def mock_event_handler() -> Mock:
 # ============================================================================
 
 @pytest.fixture(scope="function")
-def mock_llm_provider() -> MagicMock:
+def mock_llm_provider():
     """Mock LLM Provider"""
-    mock = MagicMock()
+    from backend.tests.fixtures.mock_llm import MockLLMProvider
 
-    # 配置 chat 方法
-    def mock_chat(messages, **kwargs):
-        return ChatResponse(
-            content="Mock response",
-            thinking="",
-            tool_calls=[],
-            usage={"total_tokens": 100, "prompt_tokens": 50, "completion_tokens": 50}
-        )
-    mock.chat.side_effect = mock_chat
-
-    # 配置 stream_chat 方法
-    def mock_stream_chat(messages, **kwargs):
-        chunks = [
-            StreamChunk(content="Mock", thinking="", is_complete=False, tool_calls=[]),
-            StreamChunk(content=" response", thinking="", is_complete=False, tool_calls=[]),
-            StreamChunk(content="", thinking="", is_complete=True, tool_calls=[], usage={"total_tokens": 100}),
-        ]
-        return iter(chunks)
-    mock.stream_chat.side_effect = mock_stream_chat
-
-    # 配置 count_tokens 方法
-    mock.count_tokens.return_value = 100
-
-    return mock
+    return MockLLMProvider()
 
 
 @pytest.fixture(scope="function")
@@ -174,45 +151,11 @@ def sample_round_entries() -> list[RoundEntry]:
 # ============================================================================
 
 @pytest.fixture(scope="function")
-def mock_docker_executor() -> MagicMock:
+def mock_docker_executor():
     """Mock Docker 执行器"""
-    mock = MagicMock()
+    from backend.tests.fixtures.mock_docker import MockDockerExecutor
 
-    def mock_execute(command: str, is_python_code: bool = False) -> ExecutionResult:
-        if command == "error":
-            return ExecutionResult(
-                success=False,
-                output="",
-                error="Command failed",
-                exit_code=1
-            )
-        elif command == "echo test":
-            return ExecutionResult(
-                success=True,
-                output="test\n",
-                exit_code=0
-            )
-        else:
-            return ExecutionResult(
-                success=True,
-                output=f"Executed: {command}",
-                exit_code=0
-            )
-
-    mock.execute.side_effect = mock_execute
-
-    def mock_validate(command: str) -> tuple[bool, str]:
-        dangerous = ["rm -rf /", "rm -rf /*"]
-        for d in dangerous:
-            if d in command.lower():
-                return False, f"Dangerous command detected: {d}"
-        return True, ""
-
-    mock.validate.side_effect = mock_validate
-
-    mock.interrupt.return_value = True
-
-    return mock
+    return MockDockerExecutor()
 
 
 @pytest.fixture(scope="function")

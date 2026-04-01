@@ -13,13 +13,13 @@ from uuid import uuid4
 from ..dto import (
     ApplicationResponse,
     RequestContext,
-    WorkflowContext,
     ErrorResponse,
     AgentStatus,
     StatusType,
 )
-from ..workflow import WorkflowChain
+from ..workflow import WorkflowChain, WorkflowContext
 from ..services import OrchestrationService, LifecycleService
+from ..runtime import RuntimeContextBuilder
 
 
 logger = logging.getLogger(__name__)
@@ -98,6 +98,8 @@ class AliceAgent:
         self._interrupted = False
         self._request_count = 0
         self._active_log_context: dict | None = None
+        self._active_workflow_context: WorkflowContext | None = None
+        self._runtime_context_builder = RuntimeContextBuilder()
 
         # 初始化生命周期
         if self.lifecycle:
@@ -161,12 +163,29 @@ class AliceAgent:
             if self.orchestration and self.orchestration.chat_service:
                 messages = self.orchestration.chat_service.messages
 
+            runtime_context = self._runtime_context_builder.build(
+                system_prompt=(
+                    self.orchestration.chat_service.system_prompt
+                    if self.orchestration and self.orchestration.chat_service
+                    else ""
+                ),
+                current_question=request.user_input,
+                messages=messages,
+                request_metadata=request.metadata,
+                memory_manager=self.orchestration.memory_manager if self.orchestration else None,
+                skill_registry=self.orchestration.skill_registry if self.orchestration else None,
+                tool_registry=self.orchestration.tool_registry if self.orchestration else None,
+            )
+            request.metadata = {**dict(request.metadata or {}), "runtime_context": runtime_context.to_dict()}
             workflow_context = WorkflowContext(
                 request_context=request,
                 user_input=request.user_input,
                 messages=messages,
                 interrupted=self._interrupted,
+                metadata=dict(request.metadata or {}),
+                runtime_context=runtime_context,
             )
+            self._active_workflow_context = workflow_context
 
             # 执行工作流链
             if self.workflow_chain:
@@ -268,6 +287,7 @@ class AliceAgent:
             # 恢复状态
             self._status.state = StatusType.READY
             self._active_log_context = None
+            self._active_workflow_context = None
 
     def chat(self, user_input: str, **kwargs) -> Iterator[ApplicationResponse]:
         """处理聊天请求
@@ -316,6 +336,8 @@ class AliceAgent:
             },
         )
         self._interrupted = True
+        if self._active_workflow_context is not None:
+            self._active_workflow_context.interrupted = True
 
         # 传播中断到工作流
         if self.workflow_chain:

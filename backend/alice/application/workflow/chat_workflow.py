@@ -1,37 +1,37 @@
-"""
-聊天工作流
+"""聊天工作流。"""
 
-实现 ReAct 模式的聊天工作流：思考 -> 行动 -> 观察。
-"""
+from __future__ import annotations
 
 import logging
-import re
 import time
 import traceback
-from typing import Iterator, Optional
+from typing import Any, Iterator, Optional
 from uuid import uuid4
 
 from .base_workflow import Workflow, WorkflowContext
+from .function_calling_orchestrator import FunctionCallingOrchestrator
 from ..dto import (
     ApplicationResponse,
     RequestContext,
-    StatusResponse,
-    ThinkingResponse,
-    ContentResponse,
-    ExecutingToolResponse,
-    DoneResponse,
-    ErrorResponse,
-    TokensResponse,
+    RuntimeEventResponse,
+    RuntimeEventType,
     StatusType,
+    StructuredRuntimeOutput,
+    StructuredToolCall,
+    StructuredToolResult,
 )
+from backend.alice.domain.execution.services.tool_registry import ToolRegistry
 from backend.alice.domain.llm.parsers.stream_parser import StreamParser
-
+from backend.alice.domain.llm.services.stream_service import (
+    StreamService,
+    build_tool_kwargs,
+    supports_structured_tool_calling,
+)
 
 logger = logging.getLogger(__name__)
 
 
 def _extract_workflow_logging_context(context: WorkflowContext) -> dict:
-    """提取工作流日志上下文（兼容缺省字段）"""
     request_context = context.request_context
     metadata = request_context.metadata if isinstance(request_context.metadata, dict) else {}
     session_id = str(metadata.get("session_id") or "")
@@ -54,33 +54,30 @@ def _extract_workflow_logging_context(context: WorkflowContext) -> dict:
 
 
 class ChatWorkflow(Workflow):
-    """聊天工作流
-
-    实现 ReAct 循环：
-    1. 接收用户输入
-    2. LLM 生成响应（可能包含工具调用）
-    3. 如果有工具调用，执行并返回反馈
-    4. 重复直到无工具调用
-    """
+    """聊天工作流。"""
 
     def __init__(
         self,
         chat_service=None,
         execution_service=None,
+        stream_service: StreamService | None = None,
         stream_parser: Optional[StreamParser] = None,
+        tool_registry: Optional[ToolRegistry] = None,
+        function_calling_orchestrator: FunctionCallingOrchestrator | None = None,
         max_iterations: int = 10,
     ):
-        """初始化聊天工作流
-
-        Args:
-            chat_service: 聊天服务
-            execution_service: 执行服务
-            stream_parser: 流解析器
-            max_iterations: 最大迭代次数（防止无限循环）
-        """
         self.chat_service = chat_service
         self.execution_service = execution_service
+        self.stream_service = stream_service or (
+            StreamService(provider=chat_service.provider) if chat_service is not None else None
+        )
         self.stream_parser = stream_parser or StreamParser()
+        self.tool_registry = tool_registry or ToolRegistry()
+        self.function_calling_orchestrator = function_calling_orchestrator or (
+            FunctionCallingOrchestrator(execution_service, self.tool_registry)
+            if execution_service is not None
+            else None
+        )
         self.max_iterations = max_iterations
 
     @property
@@ -88,29 +85,11 @@ class ChatWorkflow(Workflow):
         return "ChatWorkflow"
 
     def can_handle(self, context: RequestContext) -> bool:
-        """判断是否可以处理该请求"""
         return context.request_type.value == "chat"
 
     def execute(self, context: WorkflowContext) -> Iterator[ApplicationResponse]:
-        """执行聊天工作流
-
-        Args:
-            context: 工作流上下文
-
-        Yields:
-            应用响应
-        """
-        # 发送开始思考信号
-        yield StatusResponse(status=StatusType.THINKING)
-
-        # 添加用户消息到历史
-        if self.chat_service:
-            self.chat_service.add_user_message(context.user_input)
-
-        iteration = 0
-        full_content = ""
-        full_thinking = ""
         base_log_context = _extract_workflow_logging_context(context)
+        message_id_root = str(base_log_context.get("request_id") or uuid4().hex)
 
         def log_transition(
             phase: str,
@@ -155,9 +134,154 @@ class ChatWorkflow(Workflow):
             else:
                 logger.info(message, extra=extra)
 
+        def normalize_tool_call_payload(payload: dict[str, Any]) -> dict[str, Any]:
+            function = payload.get("function") or {}
+            return {
+                "id": str(payload.get("id") or ""),
+                "type": str(payload.get("type") or "function"),
+                "index": int(payload.get("index") or 0),
+                "function": {
+                    "name": str(function.get("name") or ""),
+                    "arguments": str(function.get("arguments") or ""),
+                },
+            }
+
+        def structured_tool_calls(tool_call_state: dict[int, dict[str, Any]]) -> list[StructuredToolCall]:
+            return [
+                StructuredToolCall(
+                    index=int(tool_call.get("index") or 0),
+                    id=str(tool_call.get("id") or ""),
+                    type=str(tool_call.get("type") or "function"),
+                    function_name=str((tool_call.get("function") or {}).get("name") or ""),
+                    function_arguments=str((tool_call.get("function") or {}).get("arguments") or ""),
+                )
+                for _, tool_call in sorted(tool_call_state.items())
+            ]
+
+        def build_runtime_output(
+            *,
+            iteration_no: int,
+            status: str,
+            content: str,
+            reasoning: str,
+            usage_payload: dict[str, Any],
+            tool_call_state: dict[int, dict[str, Any]],
+            tool_results: list[StructuredToolResult],
+        ) -> StructuredRuntimeOutput:
+            metadata = {
+                "iteration": iteration_no,
+                "trace_id": base_log_context.get("trace_id") or "",
+                "request_id": base_log_context.get("request_id") or "",
+                "task_id": base_log_context.get("task_id") or "",
+                "session_id": base_log_context.get("session_id") or "",
+            }
+            return StructuredRuntimeOutput(
+                message_id=f"{message_id_root}.iter{iteration_no}",
+                status=status,
+                reasoning=reasoning,
+                content=content,
+                tool_calls=structured_tool_calls(tool_call_state),
+                tool_results=list(tool_results),
+                usage=dict(usage_payload),
+                metadata=metadata,
+            )
+
+        def emit_runtime_event(
+            *,
+            iteration_no: int,
+            event_type: RuntimeEventType,
+            payload: dict[str, Any],
+            status: str,
+            content: str,
+            reasoning: str,
+            usage_payload: dict[str, Any],
+            tool_call_state: dict[int, dict[str, Any]],
+            tool_results: list[StructuredToolResult],
+        ) -> RuntimeEventResponse:
+            return RuntimeEventResponse(
+                event_type=event_type,
+                payload=dict(payload),
+                runtime_output=build_runtime_output(
+                    iteration_no=iteration_no,
+                    status=status,
+                    content=content,
+                    reasoning=reasoning,
+                    usage_payload=usage_payload,
+                    tool_call_state=tool_call_state,
+                    tool_results=tool_results,
+                ),
+            )
+
+        if not self.chat_service:
+            yield emit_runtime_event(
+                iteration_no=0,
+                event_type=RuntimeEventType.ERROR_RAISED,
+                payload={"content": "Chat service not available", "code": "NO_SERVICE"},
+                status=StatusType.ERROR.value,
+                content="",
+                reasoning="",
+                usage_payload={},
+                tool_call_state={},
+                tool_results=[],
+            )
+            return
+
+        if not self.stream_service:
+            yield emit_runtime_event(
+                iteration_no=0,
+                event_type=RuntimeEventType.ERROR_RAISED,
+                payload={"content": "Stream service not available", "code": "NO_STREAM_SERVICE"},
+                status=StatusType.ERROR.value,
+                content="",
+                reasoning="",
+                usage_payload={},
+                tool_call_state={},
+                tool_results=[],
+            )
+            return
+
+        if not supports_structured_tool_calling(self.chat_service.provider):
+            model_name = getattr(self.chat_service.provider, "model_name", "") or ""
+            yield emit_runtime_event(
+                iteration_no=0,
+                event_type=RuntimeEventType.ERROR_RAISED,
+                payload={
+                    "content": f"当前模型不支持结构化 tool calling: {model_name}",
+                    "code": "TOOL_CALLING_UNSUPPORTED",
+                },
+                status=StatusType.ERROR.value,
+                content="",
+                reasoning="",
+                usage_payload={},
+                tool_call_state={},
+                tool_results=[],
+            )
+            return
+
+        self.chat_service.add_user_message(context.user_input)
+        tools = self.tool_registry.list_openai_tools()
+        request_metadata = context.request_context.metadata if isinstance(context.request_context.metadata, dict) else {}
+        active_runtime_context = getattr(context, "runtime_context", None)
+        runtime_context_payload = (
+            active_runtime_context.to_dict()
+            if active_runtime_context is not None
+            else dict(request_metadata.get("runtime_context") or {})
+        )
+        request_metadata = {
+            **request_metadata,
+            "runtime_context": runtime_context_payload,
+        }
+
+        iteration = 0
         while iteration < self.max_iterations:
             iteration += 1
             iteration_started_at = time.monotonic()
+            full_content = ""
+            full_thinking = ""
+            usage_payload: dict[str, Any] = {}
+            tool_call_state: dict[int, dict[str, Any]] = {}
+            runtime_tool_results: list[StructuredToolResult] = []
+            runtime_event_count = 0
 
             log_transition(
                 phase="iteration_start",
@@ -165,6 +289,17 @@ class ChatWorkflow(Workflow):
                 iteration_no=iteration,
                 legacy_event_type="iteration_start",
                 data={"max_iterations": self.max_iterations},
+            )
+            yield emit_runtime_event(
+                iteration_no=iteration,
+                event_type=RuntimeEventType.STATUS_CHANGED,
+                payload={"status": StatusType.THINKING.value},
+                status=StatusType.THINKING.value,
+                content=full_content,
+                reasoning=full_thinking,
+                usage_payload=usage_payload,
+                tool_call_state=tool_call_state,
+                tool_results=runtime_tool_results,
             )
 
             if context.interrupted:
@@ -175,31 +310,36 @@ class ChatWorkflow(Workflow):
                     legacy_event_type="iteration_end",
                     data={
                         "end_reason": "interrupted",
-                        "timing": {
-                            "duration_ms": int((time.monotonic() - iteration_started_at) * 1000)
-                        },
+                        "timing": {"duration_ms": int((time.monotonic() - iteration_started_at) * 1000)},
                     },
                 )
-                yield DoneResponse()
-                break
+                yield emit_runtime_event(
+                    iteration_no=iteration,
+                    event_type=RuntimeEventType.INTERRUPT_ACK,
+                    payload={},
+                    status=StatusType.INTERRUPTED.value,
+                    content=full_content,
+                    reasoning=full_thinking,
+                    usage_payload=usage_payload,
+                    tool_call_state=tool_call_state,
+                    tool_results=runtime_tool_results,
+                )
+                return
 
-            # 流式生成响应
             try:
+                request_messages = self.chat_service.build_request_messages(runtime_context_payload)
+                request_kwargs = build_tool_kwargs(
+                    self.chat_service.provider,
+                    tools,
+                    metadata=request_metadata,
+                )
                 log_transition(
                     phase="waiting_for_model",
                     message="Chat workflow waiting for model stream",
                     iteration_no=iteration,
-                    data={"message_count": len(self.chat_service.messages) if self.chat_service else 0},
+                    data={"message_count": len(request_messages)},
                 )
-                if self.chat_service:
-                    response_iter = self.chat_service.provider.stream_chat(
-                        self.chat_service.messages
-                    )
-                else:
-                    yield ErrorResponse(content="Chat service not available", code="NO_SERVICE")
-                    break
             except Exception as e:
-                error_trace = traceback.format_exc()
                 log_transition(
                     phase="iteration_end",
                     message="Chat request failed",
@@ -209,85 +349,191 @@ class ChatWorkflow(Workflow):
                     legacy_event_type="iteration_end",
                     data={
                         "end_reason": "chat_error",
-                        "timing": {
-                            "duration_ms": int((time.monotonic() - iteration_started_at) * 1000)
-                        },
+                        "timing": {"duration_ms": int((time.monotonic() - iteration_started_at) * 1000)},
                     },
                     error={
                         "type": type(e).__name__,
                         "message": str(e),
-                        "traceback": error_trace,
+                        "traceback": traceback.format_exc(),
                     },
                 )
-                yield ErrorResponse(content=f"Chat request failed: {str(e)}", code="CHAT_ERROR")
-                break
+                yield emit_runtime_event(
+                    iteration_no=iteration,
+                    event_type=RuntimeEventType.ERROR_RAISED,
+                    payload={"content": f"Chat request failed: {e}", "code": "CHAT_ERROR"},
+                    status=StatusType.ERROR.value,
+                    content=full_content,
+                    reasoning=full_thinking,
+                    usage_payload=usage_payload,
+                    tool_call_state=tool_call_state,
+                    tool_results=runtime_tool_results,
+                )
+                return
 
-            # 处理流式响应
-            self.stream_parser.reset()
-            usage = None
-            chunk_count = 0
             log_transition(
                 phase="parsing_stream",
                 message="Chat workflow started parsing model stream",
                 iteration_no=iteration,
             )
 
-            for chunk in response_iter:
-                if context.interrupted:
-                    break
-                chunk_count += 1
+            try:
+                runtime_events = self.stream_service.stream_runtime(
+                    request_messages,
+                    should_stop=lambda: context.interrupted,
+                    **request_kwargs,
+                )
+                for runtime_event in runtime_events:
+                    runtime_event_count += 1
+                    event_name = str(runtime_event.get("event_type") or "")
+                    payload = dict(runtime_event.get("payload") or {})
 
-                # 处理 Token 统计
-                if chunk.usage:
-                    usage = chunk.usage
-                    yield TokensResponse(
-                        total=chunk.usage.total_tokens,
-                        prompt=chunk.usage.prompt_tokens,
-                        completion=chunk.usage.completion_tokens,
-                    )
+                    if event_name == RuntimeEventType.USAGE_UPDATED.value:
+                        usage_payload = dict(payload.get("usage") or {})
+                        yield emit_runtime_event(
+                            iteration_no=iteration,
+                            event_type=RuntimeEventType.USAGE_UPDATED,
+                            payload=payload,
+                            status=StatusType.STREAMING.value,
+                            content=full_content,
+                            reasoning=full_thinking,
+                            usage_payload=usage_payload,
+                            tool_call_state=tool_call_state,
+                            tool_results=runtime_tool_results,
+                        )
+                        continue
 
-                # 处理思考内容
-                if chunk.thinking:
-                    full_thinking += chunk.thinking
-                    yield ThinkingResponse(content=chunk.thinking)
+                    if event_name == RuntimeEventType.REASONING_DELTA.value:
+                        full_thinking += str(payload.get("content") or "")
+                        yield emit_runtime_event(
+                            iteration_no=iteration,
+                            event_type=RuntimeEventType.REASONING_DELTA,
+                            payload=payload,
+                            status=StatusType.STREAMING.value,
+                            content=full_content,
+                            reasoning=full_thinking,
+                            usage_payload=usage_payload,
+                            tool_call_state=tool_call_state,
+                            tool_results=runtime_tool_results,
+                        )
+                        continue
 
-                # 处理正文内容（通过流解析器分流）
-                if chunk.content:
-                    full_content += chunk.content
-                    parsed_messages = self.stream_parser.process_chunk(chunk.content)
-                    for msg in parsed_messages:
-                        if msg.type.value == "thinking":
-                            yield ThinkingResponse(content=msg.content)
-                        else:
-                            yield ContentResponse(content=msg.content)
+                    if event_name == RuntimeEventType.CONTENT_DELTA.value:
+                        full_content += str(payload.get("content") or "")
+                        yield emit_runtime_event(
+                            iteration_no=iteration,
+                            event_type=RuntimeEventType.CONTENT_DELTA,
+                            payload=payload,
+                            status=StatusType.STREAMING.value,
+                            content=full_content,
+                            reasoning=full_thinking,
+                            usage_payload=usage_payload,
+                            tool_call_state=tool_call_state,
+                            tool_results=runtime_tool_results,
+                        )
+                        continue
 
-            # 冲刷剩余内容
-            for msg in self.stream_parser.flush():
-                if msg.type.value == "thinking":
-                    yield ThinkingResponse(content=msg.content)
-                else:
-                    yield ContentResponse(content=msg.content)
+                    if event_name in {
+                        RuntimeEventType.TOOL_CALL_STARTED.value,
+                        RuntimeEventType.TOOL_CALL_ARGUMENT_DELTA.value,
+                        RuntimeEventType.TOOL_CALL_COMPLETED.value,
+                    }:
+                        normalized_tool_call = normalize_tool_call_payload(payload)
+                        tool_call_state[int(normalized_tool_call["index"])] = normalized_tool_call
+                        yield emit_runtime_event(
+                            iteration_no=iteration,
+                            event_type=RuntimeEventType(event_name),
+                            payload=payload,
+                            status=StatusType.EXECUTING_TOOL.value,
+                            content=full_content,
+                            reasoning=full_thinking,
+                            usage_payload=usage_payload,
+                            tool_call_state=tool_call_state,
+                            tool_results=runtime_tool_results,
+                        )
+                        continue
 
-            if context.interrupted:
+                    if event_name == RuntimeEventType.INTERRUPT_ACK.value:
+                        log_transition(
+                            phase="iteration_end",
+                            message="Chat workflow interrupted during stream",
+                            iteration_no=iteration,
+                            legacy_event_type="iteration_end",
+                            data={
+                                "end_reason": "interrupted_during_stream",
+                                "runtime_event_count": runtime_event_count,
+                                "timing": {"duration_ms": int((time.monotonic() - iteration_started_at) * 1000)},
+                            },
+                        )
+                        yield emit_runtime_event(
+                            iteration_no=iteration,
+                            event_type=RuntimeEventType.INTERRUPT_ACK,
+                            payload={},
+                            status=StatusType.INTERRUPTED.value,
+                            content=full_content,
+                            reasoning=full_thinking,
+                            usage_payload=usage_payload,
+                            tool_call_state=tool_call_state,
+                            tool_results=runtime_tool_results,
+                        )
+                        return
+
+                    if event_name == RuntimeEventType.MESSAGE_COMPLETED.value:
+                        full_content = str(payload.get("content") or full_content)
+                        full_thinking = str(payload.get("reasoning") or full_thinking)
+                        usage_payload = dict(payload.get("usage") or usage_payload)
+                        for tool_call in payload.get("tool_calls") or []:
+                            normalized_tool_call = normalize_tool_call_payload(dict(tool_call))
+                            tool_call_state[int(normalized_tool_call["index"])] = normalized_tool_call
+            except Exception as e:
                 log_transition(
                     phase="iteration_end",
-                    message="Chat workflow interrupted during stream",
+                    message="Chat request failed",
                     iteration_no=iteration,
+                    level="error",
+                    with_exc_info=True,
                     legacy_event_type="iteration_end",
                     data={
-                        "end_reason": "interrupted_during_stream",
-                        "chunk_count": chunk_count,
-                        "timing": {
-                            "duration_ms": int((time.monotonic() - iteration_started_at) * 1000)
-                        },
+                        "end_reason": "chat_error",
+                        "timing": {"duration_ms": int((time.monotonic() - iteration_started_at) * 1000)},
+                    },
+                    error={
+                        "type": type(e).__name__,
+                        "message": str(e),
+                        "traceback": traceback.format_exc(),
                     },
                 )
-                yield DoneResponse()
-                break
+                yield emit_runtime_event(
+                    iteration_no=iteration,
+                    event_type=RuntimeEventType.ERROR_RAISED,
+                    payload={"content": f"Chat request failed: {e}", "code": "CHAT_ERROR"},
+                    status=StatusType.ERROR.value,
+                    content=full_content,
+                    reasoning=full_thinking,
+                    usage_payload=usage_payload,
+                    tool_call_state=tool_call_state,
+                    tool_results=runtime_tool_results,
+                )
+                return
 
-            # 检查工具调用
-            tool_calls = self._extract_tool_calls(full_content)
-            tool_types = sorted({tool_type for tool_type, _ in tool_calls})
+            tool_calls = [
+                {
+                    "id": tool_call.id,
+                    "type": tool_call.type,
+                    "index": tool_call.index,
+                    "function": {
+                        "name": tool_call.function_name,
+                        "arguments": tool_call.function_arguments,
+                    },
+                }
+                for tool_call in structured_tool_calls(tool_call_state)
+            ]
+            tool_names = sorted(
+                {
+                    str((tool_call.get("function") or {}).get("name") or "")
+                    for tool_call in tool_calls
+                    if (tool_call.get("function") or {}).get("name")
+                }
+            )
 
             log_transition(
                 phase="tool_detection",
@@ -295,23 +541,17 @@ class ChatWorkflow(Workflow):
                 iteration_no=iteration,
                 legacy_event_type="tool_detection",
                 data={
-                    "chunk_count": chunk_count,
+                    "runtime_event_count": runtime_event_count,
                     "content_length": len(full_content),
                     "thinking_length": len(full_thinking),
                     "tool_call_count": len(tool_calls),
-                    "tool_types": tool_types,
-                    "usage": {
-                        "prompt_tokens": int(getattr(usage, "prompt_tokens", 0) or 0),
-                        "completion_tokens": int(getattr(usage, "completion_tokens", 0) or 0),
-                        "total_tokens": int(getattr(usage, "total_tokens", 0) or 0),
-                    },
+                    "tool_names": tool_names,
+                    "usage": dict(usage_payload),
                 },
             )
 
             if not tool_calls:
-                # 无工具调用，结束
-                if self.chat_service:
-                    self.chat_service.add_assistant_message(full_content)
+                self.chat_service.add_assistant_message(full_content)
                 log_transition(
                     phase="iteration_end",
                     message="Chat workflow iteration completed",
@@ -322,54 +562,127 @@ class ChatWorkflow(Workflow):
                         "tool_call_count": 0,
                         "content_length": len(full_content),
                         "thinking_length": len(full_thinking),
-                        "timing": {
-                            "duration_ms": int((time.monotonic() - iteration_started_at) * 1000)
-                        },
+                        "timing": {"duration_ms": int((time.monotonic() - iteration_started_at) * 1000)},
                     },
                 )
-                yield DoneResponse()
-                break
+                yield emit_runtime_event(
+                    iteration_no=iteration,
+                    event_type=RuntimeEventType.MESSAGE_COMPLETED,
+                    payload={
+                        "content": full_content,
+                        "reasoning": full_thinking,
+                        "usage": dict(usage_payload),
+                        "tool_calls": list(tool_calls),
+                    },
+                    status=StatusType.DONE.value,
+                    content=full_content,
+                    reasoning=full_thinking,
+                    usage_payload=usage_payload,
+                    tool_call_state=tool_call_state,
+                    tool_results=runtime_tool_results,
+                )
+                return
 
-            # 有工具调用，执行并继续
+            if self.function_calling_orchestrator is None:
+                yield emit_runtime_event(
+                    iteration_no=iteration,
+                    event_type=RuntimeEventType.ERROR_RAISED,
+                    payload={
+                        "content": "Function calling orchestrator not available",
+                        "code": "NO_ORCHESTRATOR",
+                    },
+                    status=StatusType.ERROR.value,
+                    content=full_content,
+                    reasoning=full_thinking,
+                    usage_payload=usage_payload,
+                    tool_call_state=tool_call_state,
+                    tool_results=runtime_tool_results,
+                )
+                return
+
             log_transition(
                 phase="executing_tools",
                 message="Chat workflow executing detected tools",
                 iteration_no=iteration,
                 data={
                     "tool_call_count": len(tool_calls),
-                    "tool_types": tool_types,
+                    "tool_names": tool_names,
                 },
             )
-            yield ExecutingToolResponse(tool_type="mixed")
 
-            # 添加助手响应到历史
-            if self.chat_service:
-                self.chat_service.add_assistant_message(full_content)
+            try:
+                orchestration_result = self.function_calling_orchestrator.execute_tool_calls(
+                    tool_calls,
+                    assistant_content=full_content,
+                    log_context={
+                        **base_log_context,
+                        "span_id": f"{base_log_context['span_id']}.iter{iteration}",
+                    },
+                )
+            except Exception as e:
+                log_transition(
+                    phase="iteration_end",
+                    message="Tool orchestration failed",
+                    iteration_no=iteration,
+                    level="error",
+                    with_exc_info=True,
+                    legacy_event_type="iteration_end",
+                    data={
+                        "end_reason": "tool_orchestration_error",
+                        "tool_call_count": len(tool_calls),
+                        "timing": {"duration_ms": int((time.monotonic() - iteration_started_at) * 1000)},
+                    },
+                    error={
+                        "type": type(e).__name__,
+                        "message": str(e),
+                        "traceback": traceback.format_exc(),
+                    },
+                )
+                yield emit_runtime_event(
+                    iteration_no=iteration,
+                    event_type=RuntimeEventType.ERROR_RAISED,
+                    payload={"content": f"Tool orchestration failed: {e}", "code": "TOOL_ERROR"},
+                    status=StatusType.ERROR.value,
+                    content=full_content,
+                    reasoning=full_thinking,
+                    usage_payload=usage_payload,
+                    tool_call_state=tool_call_state,
+                    tool_results=runtime_tool_results,
+                )
+                return
 
-            # 执行工具调用
-            results = []
-            for tool_index, (tool_type, code) in enumerate(tool_calls, start=1):
-                if context.interrupted:
-                    break
+            self.chat_service.add_message(orchestration_result.assistant_message)
+            for tool_message in orchestration_result.tool_messages:
+                self.chat_service.add_message(tool_message)
 
-                try:
-                    if self.execution_service:
-                        tool_log_context = dict(base_log_context)
-                        tool_log_context["component"] = "chat_workflow"
-                        tool_log_context["phase"] = "executing_tools"
-                        tool_log_context["span_id"] = (
-                            f"{base_log_context['span_id']}.iter{iteration}.tool{tool_index}"
-                        )
-                        result = self.execution_service.execute(
-                            code,
-                            is_python_code=(tool_type == "python"),
-                            log_context=tool_log_context,
-                        )
-                        results.append(f"{tool_type.capitalize()} 执行结果:\n{result}")
-                    else:
-                        results.append(f"执行服务不可用")
-                except Exception as e:
-                    results.append(f"{tool_type.capitalize()} 执行失败: {str(e)}")
+            for execution_result in orchestration_result.execution_results:
+                tool_result_payload = {
+                    "tool_call_id": execution_result.invocation.id or f"tool-call-{execution_result.invocation.index}",
+                    "tool_type": execution_result.invocation.type,
+                    "content": execution_result.tool_message_content(),
+                    "status": execution_result.payload.status,
+                    "metadata": dict(execution_result.payload.metadata or {}),
+                }
+                runtime_tool_results.append(
+                    StructuredToolResult(
+                        tool_call_id=str(tool_result_payload["tool_call_id"]),
+                        tool_type=str(tool_result_payload["tool_type"]),
+                        content=str(tool_result_payload["content"]),
+                        status=str(tool_result_payload["status"]),
+                        metadata=dict(tool_result_payload["metadata"]),
+                    )
+                )
+                yield emit_runtime_event(
+                    iteration_no=iteration,
+                    event_type=RuntimeEventType.TOOL_RESULT,
+                    payload=tool_result_payload,
+                    status=StatusType.EXECUTING_TOOL.value,
+                    content=full_content,
+                    reasoning=full_thinking,
+                    usage_payload=usage_payload,
+                    tool_call_state=tool_call_state,
+                    tool_results=runtime_tool_results,
+                )
 
             if context.interrupted:
                 log_transition(
@@ -379,31 +692,21 @@ class ChatWorkflow(Workflow):
                     legacy_event_type="iteration_end",
                     data={
                         "end_reason": "interrupted_during_tool_execution",
-                        "timing": {
-                            "duration_ms": int((time.monotonic() - iteration_started_at) * 1000)
-                        },
+                        "timing": {"duration_ms": int((time.monotonic() - iteration_started_at) * 1000)},
                     },
                 )
-                yield DoneResponse()
-                break
-
-            # 添加执行反馈到历史
-            feedback = "\n\n".join(results)
-            log_transition(
-                phase="writing_feedback",
-                message="Chat workflow writing tool feedback",
-                iteration_no=iteration,
-                data={
-                    "feedback_length": len(feedback),
-                    "tool_result_count": len(results),
-                },
-            )
-            if self.chat_service:
-                self.chat_service.add_user_message(f"容器执行反馈：\n{feedback}")
-
-            # 重置内容，准备下一轮
-            full_content = ""
-            full_thinking = ""
+                yield emit_runtime_event(
+                    iteration_no=iteration,
+                    event_type=RuntimeEventType.INTERRUPT_ACK,
+                    payload={},
+                    status=StatusType.INTERRUPTED.value,
+                    content=full_content,
+                    reasoning=full_thinking,
+                    usage_payload=usage_payload,
+                    tool_call_state=tool_call_state,
+                    tool_results=runtime_tool_results,
+                )
+                return
 
             log_transition(
                 phase="iteration_end",
@@ -413,52 +716,33 @@ class ChatWorkflow(Workflow):
                 data={
                     "end_reason": "tools_executed",
                     "tool_call_count": len(tool_calls),
-                    "tool_result_count": len(results),
-                    "timing": {
-                        "duration_ms": int((time.monotonic() - iteration_started_at) * 1000)
-                    },
+                    "tool_result_count": len(orchestration_result.execution_results),
+                    "tool_names": tool_names,
+                    "timing": {"duration_ms": int((time.monotonic() - iteration_started_at) * 1000)},
                 },
             )
 
-        # 更新工作内存
-        if iteration >= self.max_iterations:
-            log_transition(
-                phase="max_iterations",
-                message="Reached max chat workflow iterations",
-                level="warning",
-                legacy_event_type="max_iterations_warning",
-                data={
-                    "iteration": iteration,
-                    "max_iterations": self.max_iterations,
-                },
-            )
-            yield ErrorResponse(
-                content="达到最大迭代次数，可能存在无限循环",
-                code="MAX_ITERATIONS",
-            )
-
-    def _extract_tool_calls(self, content: str) -> list[tuple[str, str]]:
-        """从内容中提取工具调用
-
-        Args:
-            content: LLM 响应内容
-
-        Returns:
-            (工具类型, 代码) 列表
-        """
-        tool_calls = []
-
-        # 提取 Python 代码
-        python_codes = re.findall(r"```python\s*\n?(.*?)\s*```", content, re.DOTALL)
-        for code in python_codes:
-            tool_calls.append(("python", code.strip()))
-
-        # 提取 Bash 命令
-        bash_commands = re.findall(r"```bash\s*\n?(.*?)\s*```", content, re.DOTALL)
-        for cmd in bash_commands:
-            tool_calls.append(("bash", cmd.strip()))
-
-        return tool_calls
+        log_transition(
+            phase="max_iterations",
+            message="Reached max chat workflow iterations",
+            level="warning",
+            legacy_event_type="max_iterations_warning",
+            data={
+                "iteration": iteration,
+                "max_iterations": self.max_iterations,
+            },
+        )
+        yield emit_runtime_event(
+            iteration_no=iteration,
+            event_type=RuntimeEventType.ERROR_RAISED,
+            payload={"content": "达到最大迭代次数，可能存在无限循环", "code": "MAX_ITERATIONS"},
+            status=StatusType.ERROR.value,
+            content="",
+            reasoning="",
+            usage_payload={},
+            tool_call_state={},
+            tool_results=[],
+        )
 
 
 __all__ = ["ChatWorkflow"]

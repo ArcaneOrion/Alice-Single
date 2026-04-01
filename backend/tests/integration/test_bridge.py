@@ -4,11 +4,31 @@ Bridge 通信集成测试
 测试 Rust TUI 与 Python Backend 之间的通信协议
 """
 
-import pytest
 import json
-from io import StringIO
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import patch
 
+import pytest
+
+from backend.alice.application.dto.responses import (
+    ExecutingToolResponse,
+    RuntimeEventResponse,
+    RuntimeEventType,
+    StatusResponse,
+    StatusType as ResponseStatusType,
+    response_to_dict,
+)
+from backend.alice.infrastructure.bridge.legacy_compatibility_serializer import (
+    serialize_application_response,
+    serialize_canonical_event,
+    serialize_error_message,
+    serialize_status_message,
+)
+from backend.alice.infrastructure.bridge.canonical_bridge import (
+    CanonicalBridgeEvent,
+    CanonicalEventType,
+)
+from backend.alice.infrastructure.bridge.server import BridgeServer, main_with_agent
+from backend.alice.infrastructure.bridge.transport import TransportProtocol
 from backend.alice.infrastructure.bridge.protocol.messages import (
     StatusMessage,
     ThinkingMessage,
@@ -246,7 +266,17 @@ class TestStreamOutput:
 
         outputs = []
         for msg in messages:
-            output = json.dumps({"type": msg.type, "content": msg.content})
+            if isinstance(msg, TokensMessage):
+                output = json.dumps(
+                    {
+                        "type": msg.type,
+                        "total": msg.total,
+                        "prompt": msg.prompt,
+                        "completion": msg.completion,
+                    }
+                )
+            else:
+                output = json.dumps({"type": msg.type, "content": msg.content})
             outputs.append(output)
             print(output, flush=True)
 
@@ -258,6 +288,190 @@ class TestStreamOutput:
 # ============================================================================
 # 协议兼容性测试
 # ============================================================================
+
+class TestLegacyCompatibilitySerializer:
+    """legacy compatibility serializer 回归测试"""
+
+    def test_executing_tool_response_projects_to_status_message(self):
+        """ExecutingToolResponse 必须投影为 legacy status 消息"""
+        data = response_to_dict(ExecutingToolResponse(tool_type="bash", command_preview="ls"))
+
+        assert data == {"type": "status", "content": "executing_tool"}
+
+    def test_runtime_tool_call_started_projects_to_status_message(self):
+        """tool_call_started 事件必须投影为 executing_tool 状态"""
+        data = response_to_dict(
+            RuntimeEventResponse(
+                event_type=RuntimeEventType.TOOL_CALL_STARTED,
+                payload={"tool_name": "run_bash"},
+            )
+        )
+
+        assert data == {"type": "status", "content": "executing_tool"}
+
+    def test_status_response_executing_tool_projects_to_status_message(self):
+        """StatusResponse 也必须通过 compatibility serializer 投影"""
+        data = serialize_application_response(
+            StatusResponse(status=ResponseStatusType.EXECUTING_TOOL)
+        )
+
+        assert data == {"type": "status", "content": "executing_tool"}
+
+    def test_status_response_streaming_projects_to_thinking(self):
+        """streaming 状态必须向旧协议归一化为 thinking"""
+        data = serialize_application_response(
+            StatusResponse(status=ResponseStatusType.STREAMING)
+        )
+
+        assert data == {"type": "status", "content": "thinking"}
+
+    def test_runtime_unknown_event_projects_to_none(self):
+        """旧协议不支持的事件不应伪造新顶层消息类型"""
+        data = serialize_application_response(
+            RuntimeEventResponse(
+                event_type=RuntimeEventType.TOOL_RESULT,
+                payload={"tool_call_id": "call_1", "content": "ok"},
+            )
+        )
+
+        assert data is None
+
+    def test_canonical_tool_call_started_projects_to_status_message(self):
+        """canonical tool_call_started 事件必须投影为 legacy status 消息"""
+        data = serialize_canonical_event(
+            CanonicalBridgeEvent(
+                event_type=CanonicalEventType.TOOL_CALL_STARTED,
+                payload={"tool_name": "run_python"},
+            )
+        )
+
+        assert data == {"type": "status", "content": "executing_tool"}
+
+    def test_streaming_status_normalizes_to_thinking(self):
+        """streaming 必须保持向旧前端归一化为 thinking"""
+        data = serialize_status_message("streaming")
+
+        assert data == {"type": "status", "content": "thinking"}
+
+    def test_status_response_shape_stays_legacy_compatible(self):
+        """compatibility serializer 输出必须维持旧状态结构"""
+        data = serialize_application_response(
+            StatusResponse(status=ResponseStatusType.EXECUTING_TOOL)
+        )
+
+        assert data == {"type": "status", "content": "executing_tool"}
+
+
+class TestMainWithAgentCompatibility:
+    """main_with_agent 兼容输出测试"""
+
+    def test_main_with_agent_initialization_failure_uses_legacy_error_shape(self, capsys):
+        """初始化失败时必须输出旧 error 协议"""
+
+        class FailingAgent:
+            def __init__(self, **kwargs):
+                _ = kwargs
+                raise RuntimeError("boom")
+
+        main_with_agent(agent_class=FailingAgent)
+
+        captured = capsys.readouterr()
+        assert json.loads(captured.out.strip()) == serialize_error_message(
+            content="Initialization failed: boom"
+        )
+
+    def test_main_with_agent_runtime_failure_uses_legacy_error_shape(self, capsys):
+        """运行失败时必须输出旧 error 协议"""
+
+        class DummyAgent:
+            def __init__(self, **kwargs):
+                _ = kwargs
+
+        with patch("backend.alice.infrastructure.bridge.server.create_bridge_server") as create_server:
+            server = create_server.return_value
+            server.run.side_effect = RuntimeError("explode")
+
+            main_with_agent(agent_class=DummyAgent)
+
+        captured = capsys.readouterr()
+        assert json.loads(captured.out.strip()) == serialize_error_message(
+            content="Runtime Error: explode. 请查看日志输出。"
+        )
+
+
+class _RecordingTransport(TransportProtocol):
+    def __init__(self) -> None:
+        self.sent_messages: list[dict] = []
+        self._running = False
+        self._message_callback = None
+        self._eof_callback = None
+
+    def start(self) -> None:
+        self._running = True
+
+    def stop(self) -> None:
+        self._running = False
+
+    def send_message(self, message) -> None:
+        self.sent_messages.append(message)
+
+    def send_raw(self, data: str) -> None:
+        raise AssertionError(f"unexpected raw send: {data}")
+
+    def set_message_callback(self, callback) -> None:
+        self._message_callback = callback
+
+    def set_eof_callback(self, callback) -> None:
+        self._eof_callback = callback
+
+    def is_running(self) -> bool:
+        return self._running
+
+
+class TestBridgeServerOutputCompatibility:
+    """BridgeServer 输出必须统一走 legacy 兼容收口。"""
+
+    def _create_server(self) -> tuple[BridgeServer, _RecordingTransport]:
+        transport = _RecordingTransport()
+        return BridgeServer(agent=None, transport=transport), transport
+
+    def test_send_raw_message_normalizes_status_shape(self):
+        server, transport = self._create_server()
+
+        server.send_raw_message({"type": "status", "content": "streaming"})
+
+        assert transport.sent_messages == [{"type": "status", "content": "thinking"}]
+
+    def test_send_message_normalizes_status_enum_payload(self):
+        server, transport = self._create_server()
+
+        server.send_message({"type": MessageType.STATUS, "content": StatusType.EXECUTING_TOOL})
+
+        assert transport.sent_messages == [{
+            "type": "status",
+            "content": "executing_tool",
+        }]
+
+    def test_send_message_normalizes_tokens_payload(self):
+        server, transport = self._create_server()
+
+        server.send_message({"type": "tokens", "total": "9", "prompt": "4", "completion": "5"})
+
+        assert transport.sent_messages == [{
+            "type": "tokens",
+            "total": 9,
+            "prompt": 4,
+            "completion": 5,
+        }]
+
+    def test_send_raw_message_preserves_unknown_type(self):
+        server, transport = self._create_server()
+
+        payload = {"type": "interrupt"}
+        server.send_raw_message(payload)
+
+        assert transport.sent_messages == [payload]
+
 
 class TestProtocolCompatibility:
     """协议兼容性测试"""
@@ -295,10 +509,9 @@ class TestMessageValidation:
 
     def test_invalid_status_content(self):
         """测试无效状态内容"""
-        # 这个测试演示了类型限制
         # StatusType 是枚举，只能接受预定义的值
-        with pytest.raises(AttributeError):
-            StatusType.INVALID_STATUS
+        with pytest.raises(ValueError):
+            StatusType("invalid_status")
 
     def test_tokens_message_non_negative(self):
         """测试 Token 消息非负"""
