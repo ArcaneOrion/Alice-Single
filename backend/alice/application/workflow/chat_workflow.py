@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from .base_workflow import Workflow, WorkflowContext
 from .function_calling_orchestrator import FunctionCallingOrchestrator
+from ..runtime import RequestEnvelope
 from ..dto import (
     ApplicationResponse,
     RequestContext,
@@ -174,6 +175,7 @@ class ChatWorkflow(Workflow):
                 "request_id": base_log_context.get("request_id") or "",
                 "task_id": base_log_context.get("task_id") or "",
                 "session_id": base_log_context.get("session_id") or "",
+                "span_id": base_log_context.get("span_id") or "",
             }
             return StructuredRuntimeOutput(
                 message_id=f"{message_id_root}.iter{iteration_no}",
@@ -240,7 +242,10 @@ class ChatWorkflow(Workflow):
             )
             return
 
-        if not supports_structured_tool_calling(self.chat_service.provider):
+        self.chat_service.add_user_message(context.user_input)
+        tools = self.tool_registry.list_openai_tools()
+
+        if tools and not supports_structured_tool_calling(self.chat_service.provider):
             model_name = getattr(self.chat_service.provider, "model_name", "") or ""
             yield emit_runtime_event(
                 iteration_no=0,
@@ -258,19 +263,33 @@ class ChatWorkflow(Workflow):
             )
             return
 
-        self.chat_service.add_user_message(context.user_input)
-        tools = self.tool_registry.list_openai_tools()
         request_metadata = context.request_context.metadata if isinstance(context.request_context.metadata, dict) else {}
         active_runtime_context = getattr(context, "runtime_context", None)
+        active_request_envelope = getattr(context, "request_envelope", None)
+        chat_service = self.chat_service
         runtime_context_payload = (
             active_runtime_context.to_dict()
             if active_runtime_context is not None
             else dict(request_metadata.get("runtime_context") or {})
         )
-        request_metadata = {
-            **request_metadata,
-            "runtime_context": runtime_context_payload,
-        }
+
+        def build_iteration_request_envelope() -> RequestEnvelope | None:
+            if active_request_envelope is not None and iteration == 1:
+                return active_request_envelope
+            if active_runtime_context is None:
+                return None
+            return RequestEnvelope(
+                system_prompt=active_runtime_context.system_prompt,
+                messages=[message.to_dict() for message in chat_service.messages if message.role != "system"],
+                model_context={
+                    "local_time": active_runtime_context.local_time.to_dict() if active_runtime_context.local_time else {},
+                    "memory_snapshot": active_runtime_context.memory_snapshot.to_dict(),
+                    "skill_snapshot": active_runtime_context.skill_snapshot.to_dict(),
+                },
+                tools={category: list(items) for category, items in active_runtime_context.tools.items()},
+                request_metadata=active_runtime_context.request_metadata,
+                tool_history=list(active_runtime_context.tool_history),
+            )
 
         iteration = 0
         while iteration < self.max_iterations:
@@ -327,11 +346,21 @@ class ChatWorkflow(Workflow):
                 return
 
             try:
-                request_messages = self.chat_service.build_request_messages(runtime_context_payload)
+                iteration_request_envelope = build_iteration_request_envelope()
+                request_envelope_payload = (
+                    iteration_request_envelope.to_dict()
+                    if iteration_request_envelope is not None
+                    else None
+                )
+                request_messages = self.chat_service.build_request_messages(
+                    runtime_context_payload,
+                    request_envelope=iteration_request_envelope,
+                )
                 request_kwargs = build_tool_kwargs(
                     self.chat_service.provider,
                     tools,
                     metadata=request_metadata,
+                    request_envelope=request_envelope_payload,
                 )
                 log_transition(
                     phase="waiting_for_model",

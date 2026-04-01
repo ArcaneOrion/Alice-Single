@@ -63,6 +63,7 @@ class StreamManager:
         self.in_code_block = False
         self.current_end_tag = "```"
         self.current_start_tag_len = 3
+        self.buffer_open_marker_until_close = False
         self.max_buffer_size = max_buffer_size
         self.window_size = window_size
 
@@ -105,88 +106,79 @@ class StreamManager:
             list[OutputMessage]: 待发送的消息列表
         """
         output_msgs: list[OutputMessage] = []
-        just_entered_code_block = False
 
         while True:
             if not self.buffer:
                 break
 
             if not self.in_code_block:
-                # 非代码块状态：查找起始标记
                 start_idx, found_marker = self._find_start_marker()
 
                 if start_idx == -1:
-                    # 未找到标记
-                    if not is_final:
-                        # 智能前缀保留（滑动延迟检测）
-                        hold_back = self._calculate_hold_back()
-
-                        safe_len = len(self.buffer) - hold_back
-                        if safe_len > 0:
-                            output_msgs.append({
-                                "type": MSG_TYPE_CONTENT,
-                                "content": self.buffer[:safe_len]
-                            })
-                            self.buffer = self.buffer[safe_len:]
+                    if not is_final and self._should_hold_back_content():
                         break
-                    else:
-                        # 最后一次，全部输出
-                        output_msgs.append({
-                            "type": MSG_TYPE_CONTENT,
-                            "content": self.buffer
-                        })
-                        self.buffer = ""
-                        break
-                else:
-                    # 发现起始标记
-                    if start_idx > 0:
-                        output_msgs.append({
-                            "type": MSG_TYPE_CONTENT,
-                            "content": self.buffer[:start_idx]
-                        })
 
-                    self.in_code_block = True
-                    self.current_end_tag = found_marker[1]
-                    self.current_start_tag_len = len(found_marker[0])
-                    just_entered_code_block = True
-                    self.buffer = self.buffer[start_idx:]
-            else:
-                # 代码块状态：查找结束标记
-                search_offset = self.current_start_tag_len if just_entered_code_block else 0
-                end_idx = self.buffer.find(self.current_end_tag, search_offset)
+                    output_msgs.append({
+                        "type": MSG_TYPE_CONTENT,
+                        "content": self.buffer,
+                    })
+                    self.buffer = ""
+                    break
 
-                if end_idx == -1:
-                    # 未找到结束标记
-                    if not is_final:
-                        # 保留结束标签的前缀
-                        hold_back = self._calculate_end_tag_hold_back()
+                assert found_marker is not None
+                if start_idx > 0:
+                    output_msgs.append({
+                        "type": MSG_TYPE_CONTENT,
+                        "content": self.buffer[:start_idx],
+                    })
 
-                        safe_len = len(self.buffer) - hold_back
-                        if safe_len > 0:
-                            output_msgs.append({
-                                "type": MSG_TYPE_THINKING,
-                                "content": self.buffer[:safe_len]
-                            })
-                            self.buffer = self.buffer[safe_len:]
-                        break
-                    else:
-                        # 最后一次，全部输出
+                self.in_code_block = True
+                self.current_end_tag = found_marker[1]
+                self.current_start_tag_len = len(found_marker[0])
+                self.buffer_open_marker_until_close = found_marker[0].startswith("```")
+                self.buffer = self.buffer[start_idx:]
+                continue
+
+            end_idx = self.buffer.find(self.current_end_tag, self.current_start_tag_len)
+
+            if end_idx == -1:
+                if not is_final:
+                    if self.current_end_tag == "\n\n":
                         output_msgs.append({
                             "type": MSG_TYPE_THINKING,
-                            "content": self.buffer
+                            "content": self.buffer,
                         })
                         self.buffer = ""
-                        break
-                else:
-                    # 发现结束标记
-                    thinking_end = end_idx + len(self.current_end_tag)
-                    output_msgs.append({
-                        "type": MSG_TYPE_THINKING,
-                        "content": self.buffer[:thinking_end]
-                    })
-                    self.buffer = self.buffer[thinking_end:]
-                    self.in_code_block = False
-                    just_entered_code_block = False
+                        self.in_code_block = False
+                        self.current_end_tag = "```"
+                        self.current_start_tag_len = 3
+                        self.buffer_open_marker_until_close = False
+                    break
+
+                output_msgs.append({
+                    "type": MSG_TYPE_THINKING,
+                    "content": self.buffer,
+                })
+                self.buffer = ""
+                break
+
+            thinking_end = end_idx + len(self.current_end_tag)
+            output_msgs.append({
+                "type": MSG_TYPE_THINKING,
+                "content": self.buffer[:thinking_end],
+            })
+            self.buffer = self.buffer[thinking_end:]
+            self.in_code_block = False
+            self.buffer_open_marker_until_close = False
+
+            if not self.buffer:
+                output_msgs.append({
+                    "type": MSG_TYPE_CONTENT,
+                    "content": "",
+                })
+                break
+
+            continue
 
         return output_msgs
 
@@ -220,6 +212,23 @@ class StreamManager:
 
         return start_idx, found_marker
 
+    def _should_hold_back_content(self) -> bool:
+        """判断当前 buffer 尾部是否可能是起始标记前缀。"""
+        if not self.buffer:
+            return False
+
+        for start_tag, _ in MARKER_PAIRS:
+            for i in range(len(start_tag) - 1, 0, -1):
+                if self.buffer.endswith(start_tag[:i]):
+                    return True
+
+        for kw in NAKED_KEYWORDS:
+            for i in range(len(kw) - 1, 0, -1):
+                if self.buffer.endswith(kw[:i]):
+                    return True
+
+        return False
+
     def _calculate_hold_back(self) -> int:
         """
         计算智能前缀保留长度。
@@ -227,7 +236,7 @@ class StreamManager:
         Returns:
             int: 需要保留的字符数
         """
-        hold_back = self.window_size
+        hold_back = 0
 
         # 检查所有起始标记的前缀
         for start_tag, _ in MARKER_PAIRS:
@@ -274,6 +283,7 @@ class StreamManager:
         self.in_code_block = False
         self.current_end_tag = "```"
         self.current_start_tag_len = 3
+        self.buffer_open_marker_until_close = False
 
 
 __all__ = [

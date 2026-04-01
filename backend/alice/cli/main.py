@@ -32,6 +32,7 @@ from backend.alice.application.workflow import WorkflowChain, ChatWorkflow
 from backend.alice.application.dto import response_to_dict
 from backend.alice.core.config.loader import load_config
 from backend.alice.core.logging import configure_logging
+from backend.alice.domain.llm.providers.base import ProviderCapability
 from backend.alice.domain.llm.providers.openai_provider import resolve_request_header_profiles
 from backend.alice.infrastructure.bridge.legacy_compatibility_serializer import (
     serialize_error_message,
@@ -128,6 +129,11 @@ class TUIBridge:
                 request_header_profiles,
             )
 
+            # 解析 provider capability 覆盖
+            capabilities = None
+            if os.getenv("PROVIDER_SUPPORTS_TOOL_CALLING", "").lower() in ("false", "0", "no"):
+                capabilities = ProviderCapability(supports_tool_calling=False)
+
             # 创建编排服务
             orchestration = OrchestrationService.create_from_config(
                 api_key=api_key,
@@ -136,6 +142,7 @@ class TUIBridge:
                 project_root=project_root,
                 extra_headers={},
                 request_header_profiles=request_header_profiles,
+                capabilities=capabilities,
             )
 
             # 创建生命周期服务

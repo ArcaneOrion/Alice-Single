@@ -23,6 +23,7 @@ except ImportError:
 
 from backend.alice.domain.llm.providers.base import (
     BaseLLMProvider,
+    ProviderCapability,
     build_error_payload,
     emit_observability_log,
     sanitize_for_log,
@@ -171,6 +172,7 @@ class OpenAIConfig:
     max_retries: int = 2
     extra_headers: dict = field(default_factory=dict)
     request_header_profiles: list[dict] = field(default_factory=list)
+    capabilities: ProviderCapability | None = None
 
     @classmethod
     def from_env(cls, api_key: str, base_url: str = "", model_name: str = "") -> "OpenAIConfig":
@@ -197,7 +199,10 @@ class OpenAIProvider(BaseLLMProvider):
         if OpenAI is None:
             raise ImportError("openai 包未安装，请运行: pip install openai")
 
-        super().__init__(config.model_name or config.api_key)
+        super().__init__(
+            config.model_name or config.api_key,
+            capabilities=config.capabilities,
+        )
         self.config = config
         self._client: OpenAI | None = None
         self._header_rotator = RequestHeaderRotator(config.request_header_profiles)
@@ -379,8 +384,14 @@ class OpenAIProvider(BaseLLMProvider):
             "extra_headers": extra_headers,
         }
 
+        transport_kwargs = {
+            key: value
+            for key, value in kwargs.items()
+            if key not in {"request_envelope"}
+        }
+
         # 合并额外参数
-        params.update(kwargs)
+        params.update(transport_kwargs)
         request_payload = sanitize_for_log(params)
         request_state = {
             "kwargs": kwargs,

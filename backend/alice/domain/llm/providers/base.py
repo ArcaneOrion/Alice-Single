@@ -6,6 +6,7 @@
 from abc import ABC, abstractmethod
 from collections import Counter
 from collections.abc import Mapping
+from dataclasses import dataclass
 import logging
 from typing import Iterator, TYPE_CHECKING, Any
 
@@ -158,23 +159,39 @@ def extract_observability_context(
     if not isinstance(metadata, dict):
         metadata = {}
 
+    request_envelope = request_kwargs.get("request_envelope")
+    envelope_metadata = {}
+    if isinstance(request_envelope, dict):
+        candidate = request_envelope.get("request_metadata")
+        if isinstance(candidate, dict):
+            envelope_metadata = candidate
+
     trace_id = (
-        metadata.get("trace_id")
+        envelope_metadata.get("trace_id")
+        or metadata.get("trace_id")
         or request_kwargs.get("trace_id")
+        or envelope_metadata.get("request_id")
         or metadata.get("request_id")
         or request_kwargs.get("request_id")
         or ""
     )
-    request_id = metadata.get("request_id") or request_kwargs.get("request_id") or trace_id or ""
+    request_id = (
+        envelope_metadata.get("request_id")
+        or metadata.get("request_id")
+        or request_kwargs.get("request_id")
+        or trace_id
+        or ""
+    )
     task_id = (
-        metadata.get("task_id")
+        envelope_metadata.get("task_id")
+        or metadata.get("task_id")
         or request_kwargs.get("task_id")
         or request_id
         or trace_id
         or ""
     )
-    session_id = metadata.get("session_id") or request_kwargs.get("session_id") or ""
-    span_id = metadata.get("span_id") or request_kwargs.get("span_id") or ""
+    session_id = envelope_metadata.get("session_id") or metadata.get("session_id") or request_kwargs.get("session_id") or ""
+    span_id = envelope_metadata.get("span_id") or metadata.get("span_id") or request_kwargs.get("span_id") or ""
 
     base_context = {
         "trace_id": trace_id,
@@ -241,6 +258,20 @@ def emit_observability_log(
     target_logger.log(level, message or event_type, extra=extra, exc_info=exc_info)
 
 
+@dataclass(frozen=True)
+class ProviderCapability:
+    """Provider 能力声明。
+
+    每个能力都必须显式声明，不允许通过 model-name 猜测。
+    """
+    supports_tool_calling: bool = True
+    supports_streaming: bool = True
+    supports_usage_in_stream: bool = True
+    supports_thinking: bool = False
+    supports_tool_call_delta: bool = True
+    supports_extra_headers: bool = True
+
+
 class BaseLLMProvider(ABC):
     """LLM 提供商抽象基类
 
@@ -248,14 +279,20 @@ class BaseLLMProvider(ABC):
     子类需要实现具体的 API 调用逻辑。
     """
 
-    def __init__(self, model_name: str):
+    def __init__(self, model_name: str, capabilities: ProviderCapability | None = None):
         """初始化 Provider
 
         Args:
             model_name: 模型名称
+            capabilities: Provider 能力声明，默认使用 ProviderCapability()
         """
         self.model_name = model_name
+        self._capabilities = capabilities or ProviderCapability()
         self._request_count = 0
+
+    @property
+    def capabilities(self) -> ProviderCapability:
+        return self._capabilities
 
     def _emit_log(
         self,
@@ -469,4 +506,4 @@ class BaseLLMProvider(ABC):
         return self._request_count
 
 
-__all__ = ["BaseLLMProvider"]
+__all__ = ["BaseLLMProvider", "ProviderCapability"]

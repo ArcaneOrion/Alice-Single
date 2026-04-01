@@ -103,23 +103,21 @@ def _token_usage_from_chunk_usage(chunk_usage: Any) -> TokenUsage | None:
 
 
 def _supports_structured_tool_calling(provider: BaseLLMProvider) -> bool:
-    model_name = (getattr(provider, "model_name", "") or "").lower()
-    if not model_name:
-        return False
-
-    unsupported_markers = (
-        "deepseek-reasoner",
-        "o1-mini",
-        "o1-preview",
-    )
-    return not any(marker in model_name for marker in unsupported_markers)
+    return provider.capabilities.supports_tool_calling
 
 
 
-def build_tool_kwargs(provider: BaseLLMProvider, tools: list[dict], metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+def build_tool_kwargs(
+    provider: BaseLLMProvider,
+    tools: list[dict],
+    metadata: dict[str, Any] | None = None,
+    request_envelope: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     request_kwargs: dict[str, Any] = {}
     if metadata:
         request_kwargs["metadata"] = dict(metadata)
+    if request_envelope:
+        request_kwargs["request_envelope"] = dict(request_envelope)
     if not tools:
         return request_kwargs
     if not _supports_structured_tool_calling(provider):

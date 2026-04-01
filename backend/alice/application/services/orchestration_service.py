@@ -21,6 +21,7 @@ from backend.alice.domain.llm.services.chat_service import ChatService
 from backend.alice.domain.llm.services.stream_service import StreamService
 from backend.alice.domain.skills.services.skill_cache import SkillCache
 from backend.alice.domain.skills.services.skill_registry import SkillRegistry
+from backend.alice.domain.llm.providers.base import ProviderCapability
 from backend.alice.domain.llm.providers.openai_provider import OpenAIProvider, OpenAIConfig
 
 
@@ -80,6 +81,7 @@ class OrchestrationService:
         stm_days_to_keep: int = 7,
         extra_headers: dict | None = None,
         request_header_profiles: list[dict] | None = None,
+        capabilities: ProviderCapability | None = None,
         _todo_path: str | None = None,
     ) -> "OrchestrationService":
         """从配置创建编排服务
@@ -111,6 +113,7 @@ class OrchestrationService:
             model_name=model_name,
             extra_headers=extra_headers or {},
             request_header_profiles=request_header_profiles or [],
+            capabilities=capabilities,
         )
         llm_provider = OpenAIProvider(config=llm_config)
 
