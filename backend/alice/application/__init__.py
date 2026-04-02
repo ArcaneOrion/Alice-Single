@@ -1,48 +1,42 @@
 """
-Application 层
+Application 层。
 
 协调 Domain 层服务，实现应用编排逻辑。
 
-主要组件：
-- Agent: 主协调器
-- Workflow: 工作流实现
-- Services: 应用服务
-- DTO: 数据传输对象
+该包仅提供稳定的导出名；具体对象采用惰性导入，
+避免导入子包时触发不必要的跨层初始化与循环依赖。
 """
 
-# Agent
-from .agent import AliceAgent, ReActLoop, ReActConfig, ReActState
+from importlib import import_module
+from typing import TYPE_CHECKING, Any
 
-# Workflow
-from .workflow import Workflow, WorkflowContext, WorkflowChain, ChatWorkflow, ToolWorkflow
-
-# Services
-from .services import OrchestrationService, LifecycleService
-
-# DTO
-from .dto import (
-    RequestType,
-    ChatRequest,
-    InterruptRequest,
-    StatusRequest,
-    RefreshRequest,
-    ApplicationRequest,
-    RequestContext,
-    ResponseType,
-    StatusType,
-    BaseResponse,
-    ContentResponse,
-    ThinkingResponse,
-    StatusResponse,
-    ErrorResponse,
-    TokensResponse,
-    ExecutingToolResponse,
-    DoneResponse,
-    ApplicationResponse,
-    ChatResult,
-    AgentStatus,
-    response_to_dict,
-)
+if TYPE_CHECKING:
+    from .agent import AliceAgent, ReActConfig, ReActLoop, ReActState
+    from .dto import (
+        AgentStatus,
+        ApplicationRequest,
+        ApplicationResponse,
+        BaseResponse,
+        ChatRequest,
+        ChatResult,
+        ContentResponse,
+        DoneResponse,
+        ErrorResponse,
+        ExecutingToolResponse,
+        InterruptRequest,
+        RefreshRequest,
+        RequestContext,
+        RequestType,
+        ResponseType,
+        StatusRequest,
+        StatusResponse,
+        StatusType,
+        ThinkingResponse,
+        TokensResponse,
+        response_to_dict,
+    )
+    from .services import LifecycleService, OrchestrationService
+    from .workflow import ChatWorkflow, ToolWorkflow, Workflow, WorkflowChain, WorkflowContext
 
 __all__ = [
     # Agent
@@ -83,3 +77,53 @@ __all__ = [
     "AgentStatus",
     "response_to_dict",
 ]
+
+_EXPORT_MODULES = {
+    # Agent
+    "AliceAgent": ".agent",
+    "ReActLoop": ".agent",
+    "ReActConfig": ".agent",
+    "ReActState": ".agent",
+    # Workflow
+    "Workflow": ".workflow",
+    "WorkflowContext": ".workflow",
+    "WorkflowChain": ".workflow",
+    "ChatWorkflow": ".workflow",
+    "ToolWorkflow": ".workflow",
+    # Services
+    "OrchestrationService": ".services",
+    "LifecycleService": ".services",
+    # DTO
+    "RequestType": ".dto",
+    "ChatRequest": ".dto",
+    "InterruptRequest": ".dto",
+    "StatusRequest": ".dto",
+    "RefreshRequest": ".dto",
+    "ApplicationRequest": ".dto",
+    "RequestContext": ".dto",
+    "ResponseType": ".dto",
+    "StatusType": ".dto",
+    "BaseResponse": ".dto",
+    "ContentResponse": ".dto",
+    "ThinkingResponse": ".dto",
+    "StatusResponse": ".dto",
+    "ErrorResponse": ".dto",
+    "TokensResponse": ".dto",
+    "ExecutingToolResponse": ".dto",
+    "DoneResponse": ".dto",
+    "ApplicationResponse": ".dto",
+    "ChatResult": ".dto",
+    "AgentStatus": ".dto",
+    "response_to_dict": ".dto",
+}
+
+
+def __getattr__(name: str) -> Any:
+    module_name = _EXPORT_MODULES.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+    module = import_module(module_name, __name__)
+    value = getattr(module, name)
+    globals()[name] = value
+    return value
