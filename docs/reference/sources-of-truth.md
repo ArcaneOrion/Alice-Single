@@ -9,18 +9,28 @@
   - `docs/reference/code-map-coupling.md`
 - 分层边界与依赖方向：
   - `docs/architecture/overview.md`
-- Runtime Context、Tool Registry 与工具调用编排：
+- Runtime Context、Request Envelope、Tool Registry 与工具调用编排：
   - `docs/reference/code-map.md`
   - `docs/reference/code-map-structure.md`
   - `docs/reference/code-map-coupling.md`
   - `backend/alice/application/runtime/`
+  - `backend/alice/application/workflow/base_workflow.py`
+  - `backend/alice/application/workflow/chat_workflow.py`
   - `backend/alice/application/workflow/function_calling_orchestrator.py`
+  - `backend/alice/domain/llm/services/chat_service.py`
+  - `backend/alice/domain/llm/services/stream_service.py`
+  - `backend/alice/domain/llm/providers/base.py`
   - `backend/alice/domain/execution/services/tool_registry.py`
 - Bridge 协议与当前默认运行边界：
   - `docs/protocols/bridge.md`
   - `protocols/bridge_schema.json`
   - `backend/alice/application/dto/responses.py`
   - `backend/alice/infrastructure/bridge/legacy_compatibility_serializer.py`
+  - `backend/alice/infrastructure/bridge/server.py`
+  - `backend/alice/core/logging/configure.py`
+  - `backend/tests/integration/test_bridge.py`
+  - `backend/tests/integration/test_logging_e2e.py`
+  - `backend/tests/unit/test_core/test_logging_schema.py`
 - 测试策略与运行方式：
   - `docs/testing/guide.md`
   - `backend/tests/README.md`
@@ -29,6 +39,9 @@
   - `docs/operations/logging/schema.md`
   - `docs/operations/logging/migration.md`
   - `docs/operations/logging/validation.md`
+  - `backend/alice/core/logging/configure.py`
+  - `backend/tests/unit/test_core/test_logging_schema.py`
+  - `backend/tests/integration/test_logging_e2e.py`
 - 用户侧启动与交互：
   - 根目录 `README.md`
 
