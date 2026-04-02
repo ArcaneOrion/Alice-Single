@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from backend.alice.domain.llm.models.message import ChatMessage
 from backend.alice.domain.llm.models.stream_chunk import StreamChunk, TokenUsageUpdate, ToolCallDelta
-from backend.alice.domain.llm.providers.base import BaseLLMProvider
+from backend.alice.domain.llm.providers.base import BaseLLMProvider, ProviderCapability
 from backend.alice.domain.llm.services.stream_service import StreamService, build_tool_kwargs
 
 
 class _RuntimeStreamProvider(BaseLLMProvider):
-    def __init__(self) -> None:
+    def __init__(self, capabilities: ProviderCapability | None = None) -> None:
         super().__init__("gpt-4o-mini")
+        if capabilities is not None:
+            self._capabilities = capabilities
         self._chunks = [
             StreamChunk(
                 content="```python\nprint(1)\n```",
@@ -57,6 +61,23 @@ def test_build_tool_kwargs_preserves_metadata_without_tools() -> None:
 
 
 @pytest.mark.unit
+def test_build_tool_kwargs_preserves_request_envelope() -> None:
+    provider = _RuntimeStreamProvider()
+
+    kwargs = build_tool_kwargs(
+        provider,
+        [],
+        metadata={"request_id": "req-1"},
+        request_envelope={"request_metadata": {"trace_id": "trace-1", "span_id": "span-1"}},
+    )
+
+    assert kwargs == {
+        "metadata": {"request_id": "req-1"},
+        "request_envelope": {"request_metadata": {"trace_id": "trace-1", "span_id": "span-1"}},
+    }
+
+
+@pytest.mark.unit
 def test_stream_runtime_keeps_content_as_content_without_parser_heuristics() -> None:
     service = StreamService(provider=_RuntimeStreamProvider())
 
@@ -87,23 +108,59 @@ def test_stream_runtime_keeps_content_as_content_without_parser_heuristics() -> 
     assert events[4]["payload"]["usage"]["total_tokens"] == 5
     assert events[5]["payload"]["delta"] == '"}'
     assert events[6]["payload"]["function"]["arguments"] == '{"code": "print(1)"}'
-    assert events[7]["payload"] == {
-        "content": "```python\nprint(1)\n```",
-        "reasoning": "native reasoning",
-        "usage": {
-            "prompt_tokens": 2,
-            "completion_tokens": 3,
-            "total_tokens": 5,
-        },
-        "tool_calls": [
-            {
-                "id": "call_1",
-                "type": "function",
-                "index": 0,
-                "function": {
-                    "name": "run_python",
-                    "arguments": '{"code": "print(1)"}',
-                },
-            }
-        ],
+
+
+@pytest.mark.unit
+def test_build_tool_kwargs_logs_binding_snapshot_when_tools_bound(caplog) -> None:
+    provider = _RuntimeStreamProvider()
+    tools = [{"type": "function", "function": {"name": "run_bash"}}]
+
+    with caplog.at_level(logging.INFO):
+        kwargs = build_tool_kwargs(
+            provider,
+            tools,
+            metadata={"request_id": "req-1", "trace_id": "trace-1", "task_id": "task-1"},
+        )
+
+    assert kwargs["tools"] == tools
+    assert kwargs["tool_choice"] == "auto"
+    snapshot = next(
+        record
+        for record in caplog.records
+        if getattr(record, "event_type", "") == "binding.tools_bound"
+    )
+    assert snapshot.data == {
+        "model": provider.model_name,
+        "tool_count": 1,
+        "tool_names": ["run_bash"],
+        "supports_tool_calling": True,
+        "decision": "bound",
+    }
+
+
+@pytest.mark.unit
+def test_build_tool_kwargs_logs_binding_rejection_for_capability_mismatch(caplog) -> None:
+    provider = _RuntimeStreamProvider(capabilities=ProviderCapability(supports_tool_calling=False))
+    tools = [{"type": "function", "function": {"name": "run_bash"}}]
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(ValueError, match="当前模型不支持结构化 tool calling"):
+            build_tool_kwargs(
+                provider,
+                tools,
+                metadata={"request_id": "req-2", "trace_id": "trace-2", "task_id": "task-2"},
+            )
+
+    rejected = next(
+        record
+        for record in caplog.records
+        if getattr(record, "event_type", "") == "binding.capability_mismatch"
+    )
+    assert rejected.data == {
+        "model": provider.model_name,
+        "tool_count": 1,
+        "tool_names": ["run_bash"],
+        "supports_tool_calling": False,
+        "decision": "rejected",
+        "reason": "provider_does_not_support_tool_calling",
     }

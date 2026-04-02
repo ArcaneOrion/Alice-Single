@@ -20,11 +20,12 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-# 强制切换到项目根目录
-os.chdir(project_root)
-
-# 强制 stdout 使用 utf-8 编码
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", line_buffering=True)
+def _prepare_process_environment() -> None:
+    """仅在 CLI 真实运行时准备工作目录与 stdout。"""
+    os.chdir(project_root)
+    buffer = getattr(sys.stdout, "buffer", None)
+    if buffer is not None:
+        sys.stdout = io.TextIOWrapper(buffer, encoding="utf-8", line_buffering=True)
 
 from backend.alice.application.agent import AliceAgent
 from backend.alice.application.services import OrchestrationService, LifecycleService
@@ -41,6 +42,10 @@ from backend.alice.infrastructure.bridge.legacy_compatibility_serializer import 
 from backend.alice.infrastructure.bridge.protocol.messages import INTERRUPT_SIGNAL
 
 logger = logging.getLogger("AliceCLI")
+
+
+def _print_legacy_message(message: dict) -> None:
+    print(json.dumps(message), flush=True)
 
 
 def _parse_request_header_profiles(profiles_str: str) -> list[dict]:
@@ -274,7 +279,7 @@ class TUIBridge:
             data = response_to_dict(response)
             if data is None:
                 return
-            print(json.dumps(data), flush=True)
+            _print_legacy_message(data)
         except Exception as e:
             logger.error(f"发送响应失败: {e}")
 
@@ -285,7 +290,7 @@ class TUIBridge:
             status: 状态字符串
         """
         try:
-            print(json.dumps(serialize_status_message(status)), flush=True)
+            _print_legacy_message(serialize_status_message(status))
         except Exception as e:
             logger.error(f"发送状态失败: {e}")
 
@@ -297,7 +302,7 @@ class TUIBridge:
             code: 错误代码
         """
         try:
-            print(json.dumps(serialize_error_message(content=content, code=code)), flush=True)
+            _print_legacy_message(serialize_error_message(content=content, code=code))
         except Exception as e:
             logger.error(f"发送错误失败: {e}")
 
@@ -308,6 +313,7 @@ class TUIBridge:
 
 def main():
     """主入口"""
+    _prepare_process_environment()
     bridge = TUIBridge()
 
     if bridge.initialize():

@@ -7,6 +7,8 @@ Interrupt Handler
 import logging
 from typing import TYPE_CHECKING, Any, Optional
 
+from ..legacy_compatibility_serializer import serialize_status_message
+
 if TYPE_CHECKING:
     from ..server import BridgeServer
 
@@ -81,6 +83,7 @@ class InterruptHandler:
                 if agent:
                     agent.interrupt()
 
+                self.server.send_message(serialize_status_message("done"))
                 return True
 
             return False

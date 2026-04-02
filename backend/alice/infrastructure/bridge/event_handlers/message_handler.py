@@ -147,7 +147,7 @@ class MessageHandler:
                     },
                 ),
             )
-            self.server.send_error(f"Error processing input: {str(e)}")
+            self.server.send_error(f"Processing error: {str(e)}")
         finally:
             self._processing = False
 

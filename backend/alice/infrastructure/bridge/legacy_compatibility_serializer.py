@@ -2,12 +2,79 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from backend.alice.infrastructure.bridge.canonical_bridge import (
     CanonicalBridgeEvent,
     CanonicalEventType,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _compatibility_log_extra(
+    event_type: str,
+    *,
+    data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "event_type": event_type,
+        "log_category": "bridge.compatibility",
+        "context": {
+            "component": "legacy_compatibility_serializer",
+        },
+        "data": data or {},
+    }
+
+
+def _emit_serializer_used(
+    *,
+    source_kind: str,
+    projected: dict[str, Any],
+    response_type: str = "",
+    canonical_event_type: str = "",
+) -> None:
+    data = {
+        "source_kind": source_kind,
+        "legacy_message_type": str(projected.get("type") or ""),
+    }
+    if response_type:
+        data["response_type"] = response_type
+    if canonical_event_type:
+        data["canonical_event_type"] = canonical_event_type
+
+    if data["legacy_message_type"] == "status":
+        data["legacy_status"] = str(projected.get("content") or "")
+
+    logger.info(
+        "Legacy compatibility serializer used",
+        extra=_compatibility_log_extra(
+            "bridge.compatibility_serializer_used",
+            data=data,
+        ),
+    )
+
+
+def _emit_projection_drop(
+    *,
+    source_kind: str,
+    dropped_event_type: str,
+    reason: str,
+    payload: dict[str, Any] | None = None,
+) -> None:
+    logger.info(
+        "Bridge event dropped by legacy projection",
+        extra=_compatibility_log_extra(
+            "bridge.event_dropped_by_legacy_projection",
+            data={
+                "source_kind": source_kind,
+                "dropped_event_type": dropped_event_type,
+                "reason": reason,
+                "payload_keys": sorted((payload or {}).keys()),
+            },
+        ),
+    )
 
 
 def serialize_status_message(status: str) -> dict[str, Any]:
@@ -53,42 +120,50 @@ def _normalize_legacy_status(status: str) -> str:
 
 def serialize_canonical_event(event: CanonicalBridgeEvent) -> dict[str, Any] | None:
     payload = event.payload or {}
+    serialized: dict[str, Any] | None = None
 
     if event.event_type == CanonicalEventType.STATUS_CHANGED:
         status = str(payload.get("status") or "")
-        return serialize_status_message(status) if status else None
-
-    if event.event_type == CanonicalEventType.REASONING_DELTA:
-        return serialize_thinking_message(str(payload.get("content") or ""))
-
-    if event.event_type == CanonicalEventType.CONTENT_DELTA:
-        return serialize_content_message(str(payload.get("content") or ""))
-
-    if event.event_type == CanonicalEventType.USAGE_UPDATED:
+        serialized = serialize_status_message(status) if status else None
+    elif event.event_type == CanonicalEventType.REASONING_DELTA:
+        serialized = serialize_thinking_message(str(payload.get("content") or ""))
+    elif event.event_type == CanonicalEventType.CONTENT_DELTA:
+        serialized = serialize_content_message(str(payload.get("content") or ""))
+    elif event.event_type == CanonicalEventType.USAGE_UPDATED:
         usage = payload.get("usage") or {}
-        return serialize_tokens_message(
+        serialized = serialize_tokens_message(
             total=int(usage.get("total_tokens", 0) or 0),
             prompt=int(usage.get("prompt_tokens", 0) or 0),
             completion=int(usage.get("completion_tokens", 0) or 0),
         )
-
-    if event.event_type == CanonicalEventType.TOOL_CALL_STARTED:
-        return serialize_status_message("executing_tool")
-
-    if event.event_type == CanonicalEventType.MESSAGE_COMPLETED:
-        return serialize_status_message("done")
-
-    if event.event_type == CanonicalEventType.ERROR_RAISED:
-        return serialize_error_message(
+    elif event.event_type == CanonicalEventType.TOOL_CALL_STARTED:
+        serialized = serialize_status_message("executing_tool")
+    elif event.event_type == CanonicalEventType.MESSAGE_COMPLETED:
+        serialized = serialize_status_message("done")
+    elif event.event_type == CanonicalEventType.ERROR_RAISED:
+        serialized = serialize_error_message(
             content=str(payload.get("content") or ""),
             code=str(payload.get("code") or ""),
         )
+    elif event.event_type == CanonicalEventType.INTERRUPT_ACK:
+        serialized = serialize_status_message("done")
 
-    if event.event_type == CanonicalEventType.INTERRUPT_ACK:
-        return serialize_status_message("done")
+    canonical_event_type = event.event_type.value
+    if serialized is not None:
+        _emit_serializer_used(
+            source_kind="canonical_event",
+            canonical_event_type=canonical_event_type,
+            projected=serialized,
+        )
+        return serialized
 
+    _emit_projection_drop(
+        source_kind="canonical_event",
+        dropped_event_type=canonical_event_type,
+        reason="unsupported_canonical_event",
+        payload=payload,
+    )
     return None
-
 
 def serialize_runtime_event_response(response: Any) -> dict[str, Any] | None:
     raw_event_type = getattr(response, "event_type", "") or ""
@@ -98,6 +173,12 @@ def serialize_runtime_event_response(response: Any) -> dict[str, Any] | None:
     try:
         canonical_event_type = CanonicalEventType(event_type)
     except ValueError:
+        _emit_projection_drop(
+            source_kind="runtime_event_response",
+            dropped_event_type=str(event_type),
+            reason="unknown_runtime_event_type",
+            payload=dict(payload),
+        )
         return None
 
     return serialize_canonical_event(
@@ -120,23 +201,38 @@ def serialize_application_response(response: Any) -> dict[str, Any] | None:
         TokensResponse,
     )
 
+    serialized: dict[str, Any] | None = None
+
     if isinstance(response, RuntimeEventResponse):
         return serialize_runtime_event_response(response)
     if isinstance(response, ContentResponse):
-        return serialize_content_message(response.content)
-    if isinstance(response, ThinkingResponse):
-        return serialize_thinking_message(response.content)
-    if isinstance(response, StatusResponse):
-        return serialize_status_message(response.status.value)
-    if isinstance(response, ErrorResponse):
-        return serialize_error_message(response.content, response.code)
-    if isinstance(response, TokensResponse):
-        return serialize_tokens_message(response.total, response.prompt, response.completion)
-    if isinstance(response, ExecutingToolResponse):
-        return serialize_status_message("executing_tool")
-    if isinstance(response, DoneResponse):
-        return serialize_status_message("done")
-    return None
+        serialized = serialize_content_message(response.content)
+    elif isinstance(response, ThinkingResponse):
+        serialized = serialize_thinking_message(response.content)
+    elif isinstance(response, StatusResponse):
+        serialized = serialize_status_message(response.status.value)
+    elif isinstance(response, ErrorResponse):
+        serialized = serialize_error_message(response.content, response.code)
+    elif isinstance(response, TokensResponse):
+        serialized = serialize_tokens_message(response.total, response.prompt, response.completion)
+    elif isinstance(response, ExecutingToolResponse):
+        serialized = serialize_status_message("executing_tool")
+    elif isinstance(response, DoneResponse):
+        serialized = serialize_status_message("done")
+    else:
+        _emit_projection_drop(
+            source_kind="application_response",
+            dropped_event_type=type(response).__name__,
+            reason="unsupported_application_response",
+        )
+        return None
+
+    _emit_serializer_used(
+        source_kind="application_response",
+        response_type=type(response).__name__,
+        projected=serialized,
+    )
+    return serialized
 
 
 __all__ = [

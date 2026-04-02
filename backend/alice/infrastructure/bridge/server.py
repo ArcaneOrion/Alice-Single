@@ -1,15 +1,15 @@
 """
 Bridge Server
 
-桥接服务器，协调传输层、协议层和事件处理器。
-这是 Bridge Infrastructure 模块的核心组件。
+兼容桥接服务器，协调传输层、协议层和事件处理器。
+当前职责是作为 legacy bridge 协议的兼容入口薄壳。
 """
 
 import json
 import logging
 import os
 import traceback
-from typing import TYPE_CHECKING, Any, Optional, Type
+from typing import TYPE_CHECKING, Any, Optional
 
 from .legacy_compatibility_serializer import (
     serialize_error_message,
@@ -24,7 +24,6 @@ from .protocol import (
     INTERRUPT_SIGNAL,
 )
 from .transport import StdioTransport, TransportProtocol
-from .stream_manager import StreamManager
 from .event_handlers import MessageHandler, InterruptHandler
 
 if TYPE_CHECKING:
@@ -144,15 +143,12 @@ def _write_stdout_message(message: OutputMessage) -> None:
     print(json.dumps(_normalize_output_message(message), ensure_ascii=False), flush=True)
 
 
-# 默认的 StreamManager 类（允许外部注入替代实现）
-DefaultStreamManagerClass = StreamManager
-
-
 class BridgeServer:
     """
-    桥接服务器。
+    兼容桥接服务器。
 
-    负责协调 TUI (Rust) 与 Agent (Python) 之间的通信。
+    负责协调 TUI (Rust) 与 Agent (Python) 之间的通信，并将应用层响应
+    归一化为冻结的 legacy bridge 协议输出。
 
     架构：
     ```
@@ -162,18 +158,15 @@ class BridgeServer:
     Args:
         agent: AliceAgent 实例
         transport: 传输层实例（默认使用 StdioTransport）
-        stream_manager_class: StreamManager 类（允许依赖注入）
     """
 
     def __init__(
         self,
         agent: Optional["AliceAgent"] = None,
         transport: Optional[TransportProtocol] = None,
-        stream_manager_class: Type[StreamManager] = DefaultStreamManagerClass,
     ):
         self.agent = agent
         self.transport = transport or StdioTransport()
-        self.stream_manager_class = stream_manager_class
         self._running = False
 
         # 事件处理器
@@ -463,22 +456,17 @@ class BridgeServer:
 
 def create_bridge_server(
     agent: Optional["AliceAgent"] = None,
-    stream_manager_class: Type[StreamManager] = DefaultStreamManagerClass,
 ) -> BridgeServer:
     """
     创建并配置桥接服务器。
 
     Args:
         agent: AliceAgent 实例
-        stream_manager_class: StreamManager 类
 
     Returns:
         BridgeServer: 配置好的服务器实例
     """
-    return BridgeServer(
-        agent=agent,
-        stream_manager_class=stream_manager_class,
-    )
+    return BridgeServer(agent=agent)
 
 
 def main_with_agent(agent_class=None, **agent_kwargs) -> None:
@@ -576,7 +564,6 @@ def main_with_agent(agent_class=None, **agent_kwargs) -> None:
 
 __all__ = [
     "BridgeServer",
-    "DefaultStreamManagerClass",
     "create_bridge_server",
     "main_with_agent",
 ]

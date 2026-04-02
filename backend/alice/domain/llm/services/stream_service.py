@@ -26,6 +26,50 @@ from backend.alice.domain.llm.parsers.stream_parser import (
 logger = logging.getLogger(__name__)
 
 
+def _tool_names(tools: list[dict[str, Any]]) -> list[str]:
+    names: list[str] = []
+    for tool in tools:
+        if not isinstance(tool, dict):
+            continue
+        function_block = tool.get("function")
+        if isinstance(function_block, dict):
+            name = function_block.get("name")
+            if name:
+                names.append(str(name))
+    return names
+
+
+def _emit_binding_log(
+    provider: BaseLLMProvider,
+    *,
+    event_type: str,
+    metadata: dict[str, Any] | None,
+    tools: list[dict],
+    decision: str,
+    reason: str = "",
+    level: int = logging.INFO,
+) -> None:
+    data = {
+        "model": provider.model_name,
+        "tool_count": len(tools),
+        "tool_names": _tool_names(tools),
+        "supports_tool_calling": _supports_structured_tool_calling(provider),
+        "decision": decision,
+    }
+    if reason:
+        data["reason"] = reason
+    emit_observability_log(
+        logger,
+        level=level,
+        event_type=event_type,
+        component="llm.stream_service",
+        phase="bind_tools",
+        payload_kind="tool_binding",
+        kwargs={"metadata": dict(metadata or {})},
+        data=data,
+        message=event_type,
+    )
+
 def _tool_call_delta_to_dict(tool_call: Any) -> dict[str, Any]:
     return sanitize_for_log(
         {
@@ -103,7 +147,8 @@ def _token_usage_from_chunk_usage(chunk_usage: Any) -> TokenUsage | None:
 
 
 def _supports_structured_tool_calling(provider: BaseLLMProvider) -> bool:
-    return provider.capabilities.supports_tool_calling
+    capabilities = getattr(provider, "capabilities", None)
+    return bool(getattr(capabilities, "supports_tool_calling", False))
 
 
 
@@ -121,12 +166,28 @@ def build_tool_kwargs(
     if not tools:
         return request_kwargs
     if not _supports_structured_tool_calling(provider):
+        _emit_binding_log(
+            provider,
+            event_type="binding.capability_mismatch",
+            metadata=metadata,
+            tools=tools,
+            decision="rejected",
+            reason="provider_does_not_support_tool_calling",
+            level=logging.WARNING,
+        )
         model_name = getattr(provider, "model_name", "") or ""
         raise ValueError(f"当前模型不支持结构化 tool calling: {model_name}")
     request_kwargs.update({
         "tools": tools,
         "tool_choice": "auto",
     })
+    _emit_binding_log(
+        provider,
+        event_type="binding.tools_bound",
+        metadata=metadata,
+        tools=tools,
+        decision="bound",
+    )
     return request_kwargs
 
 

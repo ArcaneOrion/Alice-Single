@@ -4,6 +4,7 @@ Bridge 通信集成测试
 测试 Rust TUI 与 Python Backend 之间的通信协议
 """
 
+import io
 import json
 import logging
 from contextlib import contextmanager
@@ -13,15 +14,18 @@ from unittest.mock import MagicMock, patch
 import pytest
 from backend.alice.application.dto.responses import (
     ContentResponse,
+    DoneResponse,
     ExecutingToolResponse,
     RuntimeEventResponse,
     RuntimeEventType,
     StatusResponse,
+    TokensResponse,
     response_to_dict,
 )
 from backend.alice.application.dto.responses import (
     StatusType as ResponseStatusType,
 )
+from backend.alice.cli.main import TUIBridge
 from backend.alice.core.config.settings import LoggingConfig
 from backend.alice.core.logging.configure import configure_logging
 from backend.alice.infrastructure.bridge.canonical_bridge import (
@@ -46,8 +50,12 @@ from backend.alice.infrastructure.bridge.protocol.messages import (
     ThinkingMessage,
     TokensMessage,
 )
-from backend.alice.infrastructure.bridge.server import BridgeServer, main_with_agent
-from backend.alice.infrastructure.bridge.transport import TransportProtocol
+from backend.alice.infrastructure.bridge.server import (
+    BridgeServer,
+    create_bridge_server,
+    main_with_agent,
+)
+from backend.alice.infrastructure.bridge.transport import StdioTransport, TransportProtocol
 
 
 def _read_jsonl(path: Path) -> list[dict]:
@@ -357,27 +365,51 @@ class TestLegacyCompatibilitySerializer:
 
         assert data == {"type": "status", "content": "thinking"}
 
-    def test_runtime_unknown_event_projects_to_none(self):
+    def test_runtime_unknown_event_projects_to_none(self, caplog):
         """旧协议不支持的事件不应伪造新顶层消息类型"""
-        data = serialize_application_response(
-            RuntimeEventResponse(
-                event_type=RuntimeEventType.TOOL_RESULT,
-                payload={"tool_call_id": "call_1", "content": "ok"},
+        with caplog.at_level(logging.INFO):
+            data = serialize_application_response(
+                RuntimeEventResponse(
+                    event_type=RuntimeEventType.TOOL_RESULT,
+                    payload={"tool_call_id": "call_1", "content": "ok"},
+                )
             )
-        )
 
         assert data is None
-
-    def test_canonical_tool_call_started_projects_to_status_message(self):
-        """canonical tool_call_started 事件必须投影为 legacy status 消息"""
-        data = serialize_canonical_event(
-            CanonicalBridgeEvent(
-                event_type=CanonicalEventType.TOOL_CALL_STARTED,
-                payload={"tool_name": "run_python"},
-            )
+        dropped = next(
+            record
+            for record in caplog.records
+            if getattr(record, "event_type", "") == "bridge.event_dropped_by_legacy_projection"
         )
+        assert dropped.data == {
+            "source_kind": "canonical_event",
+            "dropped_event_type": "tool_result",
+            "reason": "unsupported_canonical_event",
+            "payload_keys": ["content", "tool_call_id"],
+        }
+
+    def test_canonical_tool_call_started_projects_to_status_message(self, caplog):
+        """canonical tool_call_started 事件必须投影为 legacy status 消息"""
+        with caplog.at_level(logging.INFO):
+            data = serialize_canonical_event(
+                CanonicalBridgeEvent(
+                    event_type=CanonicalEventType.TOOL_CALL_STARTED,
+                    payload={"tool_name": "run_python"},
+                )
+            )
 
         assert data == {"type": "status", "content": "executing_tool"}
+        used = next(
+            record
+            for record in caplog.records
+            if getattr(record, "event_type", "") == "bridge.compatibility_serializer_used"
+        )
+        assert used.data == {
+            "source_kind": "canonical_event",
+            "canonical_event_type": "tool_call_started",
+            "legacy_message_type": "status",
+            "legacy_status": "executing_tool",
+        }
 
     def test_streaming_status_normalizes_to_thinking(self):
         """streaming 必须保持向旧前端归一化为 thinking"""
@@ -412,10 +444,7 @@ class TestMainWithAgentCompatibility:
                 ),
                 enable_colors=False,
             )
-            assert not (
-                root_logger.level == original_level
-                and list(root_logger.handlers) == original_handlers
-            )
+            assert root_logger.level != original_level or list(root_logger.handlers) != original_handlers
 
         assert root_logger.level == original_level
         assert list(root_logger.handlers) == original_handlers
@@ -535,6 +564,30 @@ class _RecordingTransport(TransportProtocol):
 class TestBridgeServerOutputCompatibility:
     """BridgeServer 输出必须统一走 legacy 兼容收口。"""
 
+    def test_bridge_server_no_longer_exposes_stream_manager_dependency(self):
+        server = BridgeServer(agent=None, transport=_RecordingTransport())
+
+        assert not hasattr(server, "stream_manager_class")
+
+    def test_create_bridge_server_signature_has_no_stream_manager_parameter(self):
+        import inspect
+
+        signature = inspect.signature(create_bridge_server)
+
+        assert "stream_manager_class" not in signature.parameters
+        assert list(signature.parameters) == ["agent"]
+
+    def test_bridge_package_no_longer_exports_default_stream_manager_class(self):
+        import backend.alice.infrastructure.bridge as bridge_module
+
+        assert "DefaultStreamManagerClass" not in bridge_module.__all__
+
+    def test_bridge_package_no_longer_exports_stream_manager(self):
+        import backend.alice.infrastructure.bridge as bridge_module
+
+        assert "StreamManager" not in bridge_module.__all__
+
+
     def _create_server(self) -> tuple[BridgeServer, _RecordingTransport]:
         transport = _RecordingTransport()
         return BridgeServer(agent=None, transport=transport), transport
@@ -577,6 +630,92 @@ class TestBridgeServerOutputCompatibility:
         assert transport.sent_messages == [payload]
 
 
+class TestDualEntryParity:
+    """新旧入口对同一响应必须输出一致的 legacy wire。"""
+
+    @staticmethod
+    def _legacy_outputs_for_responses(responses):
+        return [response_to_dict(response) for response in responses if response_to_dict(response) is not None]
+
+    def test_tui_bridge_send_response_matches_legacy_bridge_projection(self, capsys):
+        bridge = TUIBridge()
+        responses = [
+            ContentResponse(content="hello bridge"),
+            RuntimeEventResponse(
+                event_type=RuntimeEventType.TOOL_CALL_STARTED,
+                payload={"tool_name": "run_bash"},
+            ),
+            StatusResponse(status=ResponseStatusType.STREAMING),
+        ]
+
+        for response in responses:
+            bridge._send_response(response)
+
+        captured = capsys.readouterr()
+        stdout_messages = [json.loads(line) for line in captured.out.splitlines() if line.strip()]
+
+        assert stdout_messages == self._legacy_outputs_for_responses(responses)
+
+    def test_tui_bridge_status_and_error_match_legacy_bridge_serializers(self, capsys):
+        bridge = TUIBridge()
+
+        bridge._send_status("streaming")
+        bridge._send_error("boom", code="E1")
+
+        captured = capsys.readouterr()
+        stdout_messages = [json.loads(line) for line in captured.out.splitlines() if line.strip()]
+
+        assert stdout_messages == [
+            serialize_status_message("streaming"),
+            serialize_error_message(content="boom", code="E1"),
+        ]
+
+
+class TestDualEntrySuccessPathParity:
+    """新旧入口在同一成功流 handler 路径上必须输出一致的 legacy wire。"""
+
+    @staticmethod
+    def _build_success_path_responses():
+        return [
+            ContentResponse(content="hello bridge"),
+            RuntimeEventResponse(
+                event_type=RuntimeEventType.TOOL_CALL_STARTED,
+                payload={"tool_name": "run_bash"},
+            ),
+            TokensResponse(total=9, prompt=4, completion=5),
+            DoneResponse(),
+        ]
+
+    def test_tui_bridge_process_user_input_matches_bridge_handler_stdout_lines(self, capsys):
+        responses = self._build_success_path_responses()
+
+        new_entry_agent = MagicMock()
+        new_entry_agent.chat.return_value = responses
+        new_entry_bridge = TUIBridge()
+        new_entry_bridge.agent = new_entry_agent
+
+        new_entry_bridge._process_user_input("hello")
+        new_entry_captured = capsys.readouterr()
+        new_entry_lines = [line for line in new_entry_captured.out.splitlines() if line.strip()]
+        new_entry_messages = [json.loads(line) for line in new_entry_lines]
+
+        old_entry_agent = MagicMock()
+        old_entry_agent.chat.return_value = responses
+        stdout_stream = io.StringIO()
+        old_entry_transport = StdioTransport(stdout_stream=stdout_stream, enable_utf8=False)
+        old_entry_server = BridgeServer(agent=old_entry_agent, transport=old_entry_transport)
+
+        old_entry_server.message_handler.handle_input("hello")
+
+        old_entry_lines = [line for line in stdout_stream.getvalue().splitlines() if line.strip()]
+        old_entry_messages = [json.loads(line) for line in old_entry_lines]
+
+        new_entry_agent.chat.assert_called_once_with("hello")
+        old_entry_agent.chat.assert_called_once_with("hello")
+        assert new_entry_messages == old_entry_messages
+        assert new_entry_lines == old_entry_lines
+
+
 class TestBridgeHandlerCompatibility:
     """Bridge handler 必须复用 agent.chat 与 legacy serializer。"""
 
@@ -600,7 +739,7 @@ class TestBridgeHandlerCompatibility:
             {"type": "status", "content": "executing_tool"},
         ]
 
-    def test_interrupt_handler_propagates_to_agent_interrupt(self):
+    def test_interrupt_handler_propagates_to_agent_interrupt_and_done_ack(self):
         transport = _RecordingTransport()
         transport.seed_pending_interrupt()
         agent = MagicMock()
@@ -611,7 +750,70 @@ class TestBridgeHandlerCompatibility:
 
         assert found is True
         agent.interrupt.assert_called_once_with()
+        assert transport.sent_messages == [serialize_status_message("done")]
         assert server.interrupt_handler.interrupt_count == 1
+
+
+class TestDualEntryInterruptParity:
+    """新旧入口在入口层识别 interrupt 后必须输出同一最小 legacy ack。"""
+
+    def test_tui_bridge_prechat_interrupt_matches_legacy_interrupt_handler(self, capsys):
+        new_entry_agent = MagicMock()
+        new_entry_bridge = TUIBridge()
+        new_entry_bridge.agent = new_entry_agent
+        new_entry_bridge.input_queue.put(INTERRUPT_SIGNAL)
+
+        new_entry_bridge._process_user_input("hello")
+        new_entry_captured = capsys.readouterr()
+        new_entry_messages = [
+            json.loads(line)
+            for line in new_entry_captured.out.splitlines()
+            if line.strip()
+        ]
+
+        old_entry_transport = _RecordingTransport()
+        old_entry_transport.seed_pending_interrupt()
+        old_entry_agent = MagicMock()
+        old_entry_server = BridgeServer(agent=old_entry_agent, transport=old_entry_transport)
+
+        found = old_entry_server.interrupt_handler.check_interrupt()
+
+        assert found is True
+        new_entry_agent.chat.assert_not_called()
+        new_entry_agent.interrupt.assert_called_once_with()
+        old_entry_agent.interrupt.assert_called_once_with()
+        assert new_entry_messages == [serialize_status_message("done")]
+        assert old_entry_transport.sent_messages == new_entry_messages
+
+
+class TestDualEntryFailureParity:
+    """新旧入口在同一 handler failure 路径上必须输出一致的 legacy error。"""
+
+    def test_tui_bridge_chat_failure_matches_legacy_message_handler_error(self, capsys):
+        new_entry_agent = MagicMock()
+        new_entry_agent.chat.side_effect = RuntimeError("boom")
+        new_entry_bridge = TUIBridge()
+        new_entry_bridge.agent = new_entry_agent
+
+        new_entry_bridge._process_user_input("hello")
+        new_entry_captured = capsys.readouterr()
+        new_entry_messages = [
+            json.loads(line)
+            for line in new_entry_captured.out.splitlines()
+            if line.strip()
+        ]
+
+        old_entry_transport = _RecordingTransport()
+        old_entry_agent = MagicMock()
+        old_entry_agent.chat.side_effect = RuntimeError("boom")
+        old_entry_server = BridgeServer(agent=old_entry_agent, transport=old_entry_transport)
+
+        old_entry_server.message_handler.handle_input("hello")
+
+        new_entry_agent.chat.assert_called_once_with("hello")
+        old_entry_agent.chat.assert_called_once_with("hello")
+        assert new_entry_messages == [serialize_error_message(content="Processing error: boom")]
+        assert old_entry_transport.sent_messages == new_entry_messages
 
 
 class TestProtocolCompatibility:

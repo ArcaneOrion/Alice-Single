@@ -37,6 +37,7 @@ TASK_EVENT_ROOTS = frozenset(
         "llm",
         "interrupt",
         "bridge",
+        "binding",
         "agent",
         "execution",
     }
@@ -206,10 +207,15 @@ def _build_schema_payload(config: LoggingConfig) -> dict[str, object]:
         "model.prompt_built",
         "model.stream_started",
         "model.stream_chunk",
-        "model.stream_completed",
         "model.tool_decision",
+        "model.stream_completed",
+        "binding.tools_bound",
+        "binding.capability_mismatch",
         "bridge.message_sent",
         "bridge.message_received",
+        "bridge.error",
+        "bridge.compatibility_serializer_used",
+        "bridge.event_dropped_by_legacy_projection",
         "workflow.state_transition",
         "executor.command_prepared",
         "executor.command_result",
@@ -316,6 +322,14 @@ def _build_schema_payload(config: LoggingConfig) -> dict[str, object]:
                 "category": "tasks",
                 "description": "Model selected or declined tool usage.",
             },
+            "binding.tools_bound": {
+                "category": "tasks",
+                "description": "Tool binding snapshot recorded for a provider request.",
+            },
+            "binding.capability_mismatch": {
+                "category": "tasks",
+                "description": "Tool binding was rejected because the provider does not support structured tool calling.",
+            },
             "bridge.message_sent": {
                 "category": "tasks",
                 "description": "Frontend-to-backend bridge message.",
@@ -323,6 +337,18 @@ def _build_schema_payload(config: LoggingConfig) -> dict[str, object]:
             "bridge.message_received": {
                 "category": "tasks",
                 "description": "Backend-to-frontend bridge message.",
+            },
+            "bridge.error": {
+                "category": "tasks",
+                "description": "Bridge execution, transport, or initialization failure details.",
+            },
+            "bridge.compatibility_serializer_used": {
+                "category": "tasks",
+                "description": "Legacy compatibility serializer projected an internal response to legacy bridge output.",
+            },
+            "bridge.event_dropped_by_legacy_projection": {
+                "category": "tasks",
+                "description": "An internal bridge event was intentionally dropped because legacy projection cannot represent it.",
             },
             "workflow.state_transition": {
                 "category": "tasks",

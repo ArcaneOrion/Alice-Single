@@ -3,14 +3,18 @@
 import json
 import logging
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from backend.alice.core.logging.jsonl_logger import JSONLCategoryFileHandler
 from backend.alice.domain.llm.models.message import ChatMessage
 from backend.alice.domain.llm.models.stream_chunk import StreamChunk, TokenUsageUpdate, ToolCallDelta
-from backend.alice.domain.llm.providers.base import BaseLLMProvider
-from backend.alice.domain.llm.services.stream_service import StreamService
+from backend.alice.domain.llm.providers.base import BaseLLMProvider, ProviderCapability
+from backend.alice.domain.llm.providers.openai_provider import OpenAIConfig, OpenAIProvider
+from backend.alice.domain.llm.services.stream_service import StreamService, build_tool_kwargs
+from backend.alice.infrastructure.bridge.canonical_bridge import CanonicalBridgeEvent, CanonicalEventType
+from backend.alice.infrastructure.bridge.legacy_compatibility_serializer import serialize_canonical_event
 
 
 REQUIRED_FIELDS = ("ts", "event_type", "level", "source")
@@ -31,8 +35,10 @@ def _assert_required_fields(record: dict[str, object]) -> None:
 class _DummyStreamProvider(BaseLLMProvider):
     """简化的流式 provider，用于在集成测试中触发 llm 日志。"""
 
-    def __init__(self) -> None:
+    def __init__(self, capabilities: ProviderCapability | None = None) -> None:
         super().__init__("test-model")
+        if capabilities is not None:
+            self._capabilities = capabilities
         self._chunks = [
             StreamChunk(
                 content="payload chunk",
@@ -54,6 +60,11 @@ class _DummyStreamProvider(BaseLLMProvider):
     def _extract_stream_chunks(self, response):
         _ = response
         yield from self._chunks
+
+
+class _NoToolSupportProvider(_DummyStreamProvider):
+    def __init__(self) -> None:
+        super().__init__(capabilities=ProviderCapability(supports_tool_calling=False))
 
 
 class _DummyToolCallStreamProvider(BaseLLMProvider):
@@ -88,10 +99,71 @@ class _DummyToolCallStreamProvider(BaseLLMProvider):
         yield from self._chunks
 
 
+class _FakeRawResponse:
+    def __init__(self, response, *, request_id: str = "req-openai-1", status_code: int = 200, retries_taken: int = 0) -> None:
+        self._response = response
+        self.status_code = status_code
+        self.retries_taken = retries_taken
+        self.headers = {"x-request-id": request_id}
+
+    def parse(self):
+        return self._response
+
+
+class _FakeCompletions:
+    def __init__(self, response) -> None:
+        self._response = response
+        self.captured_params = None
+        self.with_raw_response = self
+
+    def create(self, **params):
+        self.captured_params = params
+        return _FakeRawResponse(self._response)
+
+
+class _FakeChat:
+    def __init__(self, response) -> None:
+        self.completions = _FakeCompletions(response)
+
+
+class _FakeOpenAIClient:
+    def __init__(self, response) -> None:
+        self.chat = _FakeChat(response)
+
+
+class _FakeOpenAIProvider(OpenAIProvider):
+    def __init__(self, response) -> None:
+        super().__init__(
+            OpenAIConfig(
+                api_key="test-key",
+                base_url="https://example.test/v1",
+                model_name="gpt-4o-mini",
+            )
+        )
+        self._client = _FakeOpenAIClient(response)
+
+
+def _build_openai_response(content: str):
+    return SimpleNamespace(
+        id="resp-openai-1",
+        model="gpt-4o-mini",
+        usage={"prompt_tokens": 7, "completion_tokens": 5, "total_tokens": 12},
+        choices=[
+            SimpleNamespace(
+                finish_reason="stop",
+                message=SimpleNamespace(content=content),
+            )
+        ],
+    )
+
+
 def _build_stream_service(log_dir: Path, provider: BaseLLMProvider) -> tuple[logging.Logger, JSONLCategoryFileHandler, StreamService]:
     handler = JSONLCategoryFileHandler(
         log_dir=log_dir,
-        category_mapping={"llm.stream": "tasks"},
+        category_mapping={
+            "llm.stream": "tasks",
+            "bridge.compatibility": "tasks",
+        },
     )
 
     root_logger = logging.getLogger()
@@ -148,6 +220,14 @@ def _tool_call_delta_arguments(record: dict) -> list[str | None]:
 
 def _read_tasks_records(log_dir: Path) -> list[dict]:
     return _read_jsonl(log_dir / "tasks.jsonl")
+
+
+def _bridge_records(tasks_records: list[dict]) -> list[dict]:
+    return [record for record in tasks_records if record["event_type"].startswith("bridge.")]
+
+
+def _binding_records(tasks_records: list[dict]) -> list[dict]:
+    return [record for record in tasks_records if record["event_type"].startswith("binding.")]
 
 
 def _run_stream_collect(service: StreamService, *, task_id: str, trace_id: str):
@@ -389,3 +469,199 @@ def test_logging_e2e_tracks_typed_tool_call_aggregation(tmp_path: Path) -> None:
 
     assert not _read_jsonl(log_dir / "system.jsonl")
     assert not _read_jsonl(log_dir / "changes.jsonl")
+
+
+@pytest.mark.integration
+def test_logging_e2e_tracks_binding_observability_events(tmp_path: Path) -> None:
+    log_dir = tmp_path / "logs" / "binding-observability"
+    _, handler, _ = _build_stream_service(log_dir, _DummyStreamProvider())
+
+    bound_kwargs = build_tool_kwargs(
+        _DummyStreamProvider(),
+        [{"type": "function", "function": {"name": "run_bash"}}],
+        metadata={"task_id": "task-bind-1", "trace_id": "trace-bind-1", "request_id": "req-bind-1"},
+    )
+
+    with pytest.raises(ValueError, match="当前模型不支持结构化 tool calling"):
+        build_tool_kwargs(
+            _NoToolSupportProvider(),
+            [{"type": "function", "function": {"name": "run_bash"}}],
+            metadata={"task_id": "task-bind-2", "trace_id": "trace-bind-2", "request_id": "req-bind-2"},
+        )
+
+    _close_handler(handler)
+
+    assert bound_kwargs["tool_choice"] == "auto"
+    tasks_records = _read_tasks_records(log_dir)
+    binding_records = _binding_records(tasks_records)
+    assert [record["event_type"] for record in binding_records] == [
+        "binding.tools_bound",
+        "binding.capability_mismatch",
+    ]
+
+    tools_bound = _find_event(tasks_records, "binding.tools_bound")
+    capability_mismatch = _find_event(tasks_records, "binding.capability_mismatch")
+
+    assert tools_bound["context"]["task_id"] == "task-bind-1"
+    assert tools_bound["data"] == {
+        "model": "test-model",
+        "tool_count": 1,
+        "tool_names": ["run_bash"],
+        "supports_tool_calling": True,
+        "decision": "bound",
+    }
+    assert capability_mismatch["context"]["task_id"] == "task-bind-2"
+    assert capability_mismatch["data"] == {
+        "model": "test-model",
+        "tool_count": 1,
+        "tool_names": ["run_bash"],
+        "supports_tool_calling": False,
+        "decision": "rejected",
+        "reason": "provider_does_not_support_tool_calling",
+    }
+
+
+@pytest.mark.integration
+def test_logging_e2e_tracks_openai_api_request_observability(tmp_path: Path) -> None:
+    log_dir = tmp_path / "logs" / "openai-request"
+    _, handler, _ = _build_stream_service(log_dir, _DummyStreamProvider())
+
+    provider = _FakeOpenAIProvider(_build_openai_response("provider payload"))
+    request_kwargs = {
+        "metadata": {
+            "task_id": "task-request-1",
+            "trace_id": "trace-request-1",
+            "request_id": "req-request-1",
+            "session_id": "session-request-1",
+            "span_id": "span-request-1",
+        },
+        "request_envelope": {
+            "request_metadata": {
+                "trace_id": "trace-envelope-1",
+                "request_id": "req-envelope-1",
+                "task_id": "task-envelope-1",
+                "session_id": "session-envelope-1",
+                "span_id": "span-envelope-1",
+            }
+        },
+        "temperature": 0.2,
+    }
+    messages = [
+        ChatMessage.system("<runtime_context>\ncurrent_question: where?\nrequest_metadata: {'trace_id': 'trace-request-1'}"),
+        ChatMessage.user("hello provider"),
+    ]
+
+    response = provider.chat(messages, **request_kwargs)
+
+    _close_handler(handler)
+
+    assert response.content == "provider payload"
+    tasks_records = _read_tasks_records(log_dir)
+    api_request = _find_event(tasks_records, "api.request")
+    api_response = _find_event(tasks_records, "api.response")
+    prompt_built = _find_event(tasks_records, "model.prompt_built")
+
+    for record in (prompt_built, api_request, api_response):
+        _assert_required_fields(record)
+
+    assert api_request["context"] == {
+        "trace_id": "trace-envelope-1",
+        "request_id": "req-envelope-1",
+        "task_id": "task-envelope-1",
+        "session_id": "session-envelope-1",
+        "span_id": "span-envelope-1",
+        "component": "llm.provider.openai",
+        "phase": "request",
+        "payload_kind": "chat.completions",
+    }
+    assert api_request["data"]["provider"] == "openai"
+    assert api_request["data"]["base_url"] == "https://example.test/v1"
+    assert api_request["data"]["request_path"] == "/chat/completions"
+    assert api_request["data"]["model"] == "gpt-4o-mini"
+    assert api_request["data"]["stream"] is False
+    assert api_request["data"]["timeout"] == 120
+    assert api_request["data"]["max_retries"] == 2
+    assert api_request["data"]["request_count"] == 1
+    assert api_request["data"]["extra_headers"]["User-Agent"] == "curl/8.0"
+    assert api_request["data"]["request_params"]["temperature"] == 0.2
+    assert api_request["data"]["request_params"]["stream"] is False
+    assert api_request["data"]["request_params"]["model"] == "gpt-4o-mini"
+    assert "request_envelope" not in api_request["data"]["request_params"]
+    assert api_request["data"]["message_count"] == 2
+    assert api_request["data"]["role_distribution"] == {"system": 1, "user": 1}
+    assert api_request["data"]["messages"][0]["role"] == "system"
+    assert "<runtime_context>" in api_request["data"]["messages"][0]["content"]
+    assert "current_question" in api_request["data"]["messages"][0]["content"]
+    assert "request_metadata" in api_request["data"]["messages"][0]["content"]
+    assert api_request["data"]["payload"]["temperature"] == 0.2
+    assert api_request["data"]["payload"]["messages"][1]["content"] == "hello provider"
+
+    assert prompt_built["context"]["component"] == "llm.provider.base"
+    assert prompt_built["context"]["phase"] == "prepare"
+    assert prompt_built["context"]["payload_kind"] == "messages"
+    assert prompt_built["context"]["trace_id"] == "trace-envelope-1"
+    assert prompt_built["data"]["request_kwargs"]["metadata"]["trace_id"] == "trace-request-1"
+    assert prompt_built["data"]["request_kwargs"]["request_envelope"]["request_metadata"]["trace_id"] == "trace-envelope-1"
+
+    assert api_response["context"]["request_id"] == "req-envelope-1"
+    assert api_response["data"]["provider"] == "openai"
+    assert api_response["data"]["response_request_id"] == "req-openai-1"
+    assert api_response["data"]["status_code"] == 200
+    assert api_response["data"]["usage"] == {
+        "prompt_tokens": "*",
+        "completion_tokens": "*",
+        "total_tokens": "**",
+    }
+    assert "latency_ms" in api_response.get("timing", {})
+
+    assert not _read_jsonl(log_dir / "system.jsonl")
+    assert not _read_jsonl(log_dir / "changes.jsonl")
+
+
+@pytest.mark.integration
+def test_logging_e2e_tracks_legacy_compatibility_projection_events(tmp_path: Path) -> None:
+    log_dir = tmp_path / "logs" / "bridge-compatibility"
+    _, handler, _ = _build_stream_service(log_dir, _DummyStreamProvider())
+
+    projected = serialize_canonical_event(
+        CanonicalBridgeEvent(
+            event_type=CanonicalEventType.TOOL_CALL_STARTED,
+            payload={"tool_name": "run_bash"},
+        )
+    )
+    dropped = serialize_canonical_event(
+        CanonicalBridgeEvent(
+            event_type=CanonicalEventType.TOOL_RESULT,
+            payload={"tool_call_id": "call_1", "content": "ok"},
+        )
+    )
+
+    _close_handler(handler)
+
+    assert projected == {"type": "status", "content": "executing_tool"}
+    assert dropped is None
+
+    tasks_records = _read_tasks_records(log_dir)
+    bridge_records = _bridge_records(tasks_records)
+    assert [record["event_type"] for record in bridge_records] == [
+        "bridge.compatibility_serializer_used",
+        "bridge.event_dropped_by_legacy_projection",
+    ]
+
+    serializer_used = _find_event(tasks_records, "bridge.compatibility_serializer_used")
+    dropped_record = _find_event(tasks_records, "bridge.event_dropped_by_legacy_projection")
+
+    assert serializer_used["context"]["component"] == "legacy_compatibility_serializer"
+    assert serializer_used["data"] == {
+        "source_kind": "canonical_event",
+        "canonical_event_type": "tool_call_started",
+        "legacy_message_type": "status",
+        "legacy_status": "executing_tool",
+    }
+    assert dropped_record["context"]["component"] == "legacy_compatibility_serializer"
+    assert dropped_record["data"] == {
+        "source_kind": "canonical_event",
+        "dropped_event_type": "tool_result",
+        "reason": "unsupported_canonical_event",
+        "payload_keys": ["content", "tool_call_id"],
+    }

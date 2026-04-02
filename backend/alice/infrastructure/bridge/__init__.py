@@ -14,11 +14,9 @@ TUI (Rust) 与 Agent (Python) 之间的桥接层。
 
 from .server import (
     BridgeServer,
-    DefaultStreamManagerClass,
     create_bridge_server,
     main_with_agent,
 )
-from .stream_manager import StreamManager
 
 # Protocol
 from .protocol import (
@@ -60,11 +58,8 @@ from .event_handlers import (
 __all__ = [
     # Server
     "BridgeServer",
-    "DefaultStreamManagerClass",
     "create_bridge_server",
     "main_with_agent",
-    # Stream Manager
-    "StreamManager",
     # Protocol - Messages
     "MessageType",
     "StatusType",

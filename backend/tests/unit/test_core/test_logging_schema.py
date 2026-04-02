@@ -18,7 +18,9 @@ class TestLoggingSchema(unittest.TestCase):
 
     def setUp(self) -> None:
         self.schema_path = Path(".alice/logs/schema_version.json")
-        self.assertTrue(self.schema_path.exists(), "日志 schema 文件不存在")
+        config = LoggingConfig(logs_dir=str(self.schema_path.parent))
+        self.schema_path.parent.mkdir(parents=True, exist_ok=True)
+        _ensure_schema_file(config, self.schema_path.parent)
         with self.schema_path.open("r", encoding="utf-8") as fp:
             self.schema = json.load(fp)
 
@@ -48,6 +50,11 @@ class TestLoggingSchema(unittest.TestCase):
                 "task.progress",
                 "task.completed",
                 "task.failed",
+                "binding.tools_bound",
+                "binding.capability_mismatch",
+                "bridge.error",
+                "bridge.compatibility_serializer_used",
+                "bridge.event_dropped_by_legacy_projection",
             ],
             "changes.jsonl": [
                 "change.file_saved",
@@ -74,6 +81,11 @@ class TestLoggingSchema(unittest.TestCase):
             "system.config_reload",
             "system.alert",
             "model.stream_started",
+            "binding.tools_bound",
+            "binding.capability_mismatch",
+            "bridge.error",
+            "bridge.compatibility_serializer_used",
+            "bridge.event_dropped_by_legacy_projection",
             "task.created",
             "task.started",
             "task.progress",
