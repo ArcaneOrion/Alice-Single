@@ -9,10 +9,11 @@ from typing import Any, Iterator
 from dataclasses import dataclass
 
 from ..dto import ApplicationResponse, RequestContext
-from ..runtime import RuntimeContext
+from ..runtime import RequestEnvelope, RuntimeContext
 
 
 RuntimeContextPayload = RuntimeContext
+RequestEnvelopePayload = RequestEnvelope
 
 
 @dataclass
@@ -35,6 +36,7 @@ class WorkflowContext:
     interrupted: bool = False
     metadata: dict[str, Any] | None = None
     runtime_context: RuntimeContextPayload | None = None
+    request_envelope: RequestEnvelopePayload | None = None
 
     def __init__(
         self,
@@ -44,6 +46,7 @@ class WorkflowContext:
         interrupted: bool = False,
         metadata: dict | None = None,
         runtime_context: RuntimeContextPayload | None = None,
+        request_envelope: RequestEnvelopePayload | None = None,
     ):
         self.request_context = request_context
         self.user_input = user_input
@@ -51,6 +54,7 @@ class WorkflowContext:
         self.interrupted = interrupted
         self.metadata = metadata or {}
         self.runtime_context = runtime_context
+        self.request_envelope = request_envelope
 
 
 class Workflow(ABC):

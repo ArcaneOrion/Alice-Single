@@ -4,6 +4,7 @@ from .models import (
     HistoryContext,
     LocalTimeContext,
     MemorySnapshot,
+    RequestEnvelope,
     RequestMetadata,
     RuntimeContext,
     SkillSnapshot,
@@ -20,6 +21,7 @@ __all__ = [
     "SkillSnapshotItem",
     "SkillSnapshot",
     "RuntimeContext",
+    "RequestEnvelope",
     "RuntimeContextBuilder",
     "TimeProvider",
 ]

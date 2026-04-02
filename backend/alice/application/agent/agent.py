@@ -176,7 +176,10 @@ class AliceAgent:
                 skill_registry=self.orchestration.skill_registry if self.orchestration else None,
                 tool_registry=self.orchestration.tool_registry if self.orchestration else None,
             )
-            request.metadata = {**dict(request.metadata or {}), "runtime_context": runtime_context.to_dict()}
+            request_envelope = self._runtime_context_builder.build_request_envelope(
+                runtime_context=runtime_context,
+                messages=messages,
+            )
             workflow_context = WorkflowContext(
                 request_context=request,
                 user_input=request.user_input,
@@ -184,6 +187,7 @@ class AliceAgent:
                 interrupted=self._interrupted,
                 metadata=dict(request.metadata or {}),
                 runtime_context=runtime_context,
+                request_envelope=request_envelope,
             )
             self._active_workflow_context = workflow_context
 

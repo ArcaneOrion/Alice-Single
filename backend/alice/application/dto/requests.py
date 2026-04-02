@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Optional
 
-from ..runtime import RuntimeContext
+from ..runtime import RequestEnvelope, RuntimeContext
 
 
 class RequestType(str, Enum):
@@ -140,6 +140,7 @@ class WorkflowContext:
     interrupted: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
     runtime_context: RuntimeContext | None = None
+    request_envelope: RequestEnvelope | None = None
 
 
 __all__ = [

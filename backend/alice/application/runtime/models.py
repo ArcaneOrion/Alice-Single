@@ -19,6 +19,33 @@ class RequestMetadata:
     stream: bool = True
     extras: dict[str, Any] = field(default_factory=dict)
 
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any] | None) -> "RequestMetadata":
+        metadata = dict(payload or {})
+        return cls(
+            session_id=str(metadata.get("session_id") or ""),
+            trace_id=str(metadata.get("trace_id") or ""),
+            request_id=str(metadata.get("request_id") or ""),
+            task_id=str(metadata.get("task_id") or ""),
+            span_id=str(metadata.get("span_id") or ""),
+            enable_thinking=bool(metadata.get("enable_thinking", True)),
+            stream=bool(metadata.get("stream", True)),
+            extras={
+                key: value
+                for key, value in metadata.items()
+                if key
+                not in {
+                    "session_id",
+                    "trace_id",
+                    "request_id",
+                    "task_id",
+                    "span_id",
+                    "enable_thinking",
+                    "stream",
+                }
+            },
+        )
+
     def to_dict(self) -> dict[str, Any]:
         payload = {
             "session_id": self.session_id,
@@ -138,6 +165,28 @@ class RuntimeContext:
         return payload
 
 
+@dataclass(frozen=True)
+class RequestEnvelope:
+    """Phase-2 canonical request envelope。"""
+
+    system_prompt: str = ""
+    messages: list[dict[str, Any]] = field(default_factory=list)
+    model_context: dict[str, Any] = field(default_factory=dict)
+    tools: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    request_metadata: RequestMetadata = field(default_factory=RequestMetadata)
+    tool_history: list[dict[str, Any]] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "system": {"prompt": self.system_prompt},
+            "messages": list(self.messages),
+            "model_context": dict(self.model_context),
+            "tools": {category: list(items) for category, items in self.tools.items()},
+            "request_metadata": self.request_metadata.to_dict(),
+            "tool_history": list(self.tool_history),
+        }
+
+
 __all__ = [
     "RequestMetadata",
     "LocalTimeContext",
@@ -146,4 +195,5 @@ __all__ = [
     "SkillSnapshotItem",
     "SkillSnapshot",
     "RuntimeContext",
+    "RequestEnvelope",
 ]

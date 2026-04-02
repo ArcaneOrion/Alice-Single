@@ -9,6 +9,7 @@ from ...domain.llm.models.message import ChatMessage
 from .models import (
     HistoryContext,
     MemorySnapshot,
+    RequestEnvelope,
     RequestMetadata,
     RuntimeContext,
     SkillSnapshot,
@@ -46,31 +47,37 @@ class RuntimeContextBuilder:
             memory_snapshot=self._memory_snapshot(memory_manager),
             skill_snapshot=self._skill_snapshot(skill_registry),
             tools=self._tool_snapshot(tool_registry),
-            request_metadata=RequestMetadata(
-                session_id=str(metadata.get("session_id") or ""),
-                trace_id=str(metadata.get("trace_id") or ""),
-                request_id=str(metadata.get("request_id") or ""),
-                task_id=str(metadata.get("task_id") or ""),
-                span_id=str(metadata.get("span_id") or ""),
-                enable_thinking=bool(metadata.get("enable_thinking", True)),
-                stream=bool(metadata.get("stream", True)),
-                extras={
+            request_metadata=RequestMetadata.from_dict(
+                {
                     key: value
                     for key, value in metadata.items()
-                    if key
-                    not in {
-                        "session_id",
-                        "trace_id",
-                        "request_id",
-                        "task_id",
-                        "span_id",
-                        "enable_thinking",
-                        "stream",
-                        "runtime_context",
-                    }
-                },
+                    if key != "runtime_context"
+                }
             ),
             tool_history=list(tool_history or []),
+        )
+
+    def build_request_envelope(
+        self,
+        *,
+        runtime_context: RuntimeContext,
+        messages: list[ChatMessage] | None = None,
+    ) -> RequestEnvelope:
+        history_messages = [message.to_dict() for message in (messages or []) if message.role != "system"]
+        if runtime_context.current_question:
+            history_messages.append(ChatMessage.user(runtime_context.current_question).to_dict())
+        model_context = {
+            "local_time": runtime_context.local_time.to_dict() if runtime_context.local_time else {},
+            "memory_snapshot": runtime_context.memory_snapshot.to_dict(),
+            "skill_snapshot": runtime_context.skill_snapshot.to_dict(),
+        }
+        return RequestEnvelope(
+            system_prompt=runtime_context.system_prompt,
+            messages=history_messages,
+            model_context=model_context,
+            tools={category: list(items) for category, items in runtime_context.tools.items()},
+            request_metadata=runtime_context.request_metadata,
+            tool_history=list(runtime_context.tool_history),
         )
 
     @staticmethod
