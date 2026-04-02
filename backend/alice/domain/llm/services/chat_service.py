@@ -5,7 +5,8 @@
 
 import json
 import logging
-from typing import Any, Callable
+from collections.abc import Callable, Mapping
+from typing import Any, Protocol
 
 from backend.alice.domain.llm.models.message import ChatMessage
 from backend.alice.domain.llm.models.response import ChatResponse
@@ -18,6 +19,11 @@ from backend.alice.domain.llm.services.stream_service import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class RequestEnvelopeLike(Protocol):
+    def to_dict(self) -> dict[str, Any]:
+        """将 envelope 投影为统一 dict。"""
 
 
 class ChatService:
@@ -135,8 +141,14 @@ class ChatService:
                 merged[key] = value
         return self.set_runtime_context(merged)
 
-    def build_request_messages(self, runtime_context: dict[str, Any] | None = None) -> list[ChatMessage]:
+    def build_request_messages(
+        self,
+        runtime_context: dict[str, Any] | None = None,
+        request_envelope: RequestEnvelopeLike | Mapping[str, Any] | None = None,
+    ) -> list[ChatMessage]:
         """构造一次性 provider request messages，不污染持久历史。"""
+        if request_envelope:
+            return self._build_request_messages_from_envelope(request_envelope)
         if not runtime_context:
             return list(self._messages)
 
@@ -152,8 +164,52 @@ class ChatService:
             request_messages.insert(0, system_message)
         return request_messages
 
-    def _compose_system_prompt_for(self, runtime_context: dict[str, Any] | None) -> str:
-        base_prompt = (self._base_system_prompt or "").strip()
+    def _build_request_messages_from_envelope(
+        self,
+        request_envelope: RequestEnvelopeLike | Mapping[str, Any],
+    ) -> list[ChatMessage]:
+        envelope = self._request_envelope_to_dict(request_envelope)
+        if envelope is None:
+            return list(self._messages)
+        system_prompt = str(((envelope.get("system") or {}).get("prompt")) or self._base_system_prompt or "")
+        model_context = envelope.get("model_context")
+        runtime_context = dict(model_context) if isinstance(model_context, Mapping) else {}
+        tool_history = envelope.get("tool_history")
+        if isinstance(tool_history, list) and tool_history:
+            runtime_context["tool_history"] = list(tool_history)
+        system_prompt = self._compose_system_prompt_for(runtime_context, base_prompt=system_prompt)
+        request_messages: list[ChatMessage] = []
+        if system_prompt:
+            request_messages.append(ChatMessage.system(system_prompt))
+        for message in envelope.get("messages") or []:
+            if isinstance(message, dict):
+                request_messages.append(ChatMessage.from_dict(message))
+        return request_messages or list(self._messages)
+
+    @staticmethod
+    def _request_envelope_to_dict(
+        request_envelope: RequestEnvelopeLike | Mapping[str, Any],
+    ) -> dict[str, Any] | None:
+        if isinstance(request_envelope, Mapping):
+            return dict(request_envelope)
+
+        to_dict = getattr(request_envelope, "to_dict", None)
+        if not callable(to_dict):
+            return None
+
+        payload = to_dict()
+        if not isinstance(payload, Mapping):
+            return None
+        return dict(payload)
+
+    def _compose_system_prompt_for(
+        self,
+        runtime_context: dict[str, Any] | None,
+        *,
+        base_prompt: str | None = None,
+    ) -> str:
+        base_prompt_value = self._base_system_prompt if base_prompt is None else base_prompt
+        base_prompt = (base_prompt_value or "").strip()
         context_payload = self._prune_runtime_context(runtime_context or {})
         if not context_payload:
             return base_prompt
