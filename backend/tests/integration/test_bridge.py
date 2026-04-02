@@ -5,18 +5,28 @@ Bridge 通信集成测试
 """
 
 import json
+import logging
+from contextlib import contextmanager
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from backend.alice.application.dto.responses import (
     ContentResponse,
     ExecutingToolResponse,
     RuntimeEventResponse,
     RuntimeEventType,
     StatusResponse,
-    StatusType as ResponseStatusType,
     response_to_dict,
+)
+from backend.alice.application.dto.responses import (
+    StatusType as ResponseStatusType,
+)
+from backend.alice.core.config.settings import LoggingConfig
+from backend.alice.core.logging.configure import configure_logging
+from backend.alice.infrastructure.bridge.canonical_bridge import (
+    CanonicalBridgeEvent,
+    CanonicalEventType,
 )
 from backend.alice.infrastructure.bridge.legacy_compatibility_serializer import (
     serialize_application_response,
@@ -24,24 +34,45 @@ from backend.alice.infrastructure.bridge.legacy_compatibility_serializer import 
     serialize_error_message,
     serialize_status_message,
 )
-from backend.alice.infrastructure.bridge.canonical_bridge import (
-    CanonicalBridgeEvent,
-    CanonicalEventType,
+from backend.alice.infrastructure.bridge.protocol.messages import (
+    INTERRUPT_SIGNAL,
+    ContentMessage,
+    ErrorMessage,
+    FrontendRequest,
+    InterruptMessage,
+    MessageType,
+    StatusMessage,
+    StatusType,
+    ThinkingMessage,
+    TokensMessage,
 )
 from backend.alice.infrastructure.bridge.server import BridgeServer, main_with_agent
 from backend.alice.infrastructure.bridge.transport import TransportProtocol
-from backend.alice.infrastructure.bridge.protocol.messages import (
-    StatusMessage,
-    ThinkingMessage,
-    ContentMessage,
-    TokensMessage,
-    ErrorMessage,
-    InterruptMessage,
-    MessageType,
-    StatusType,
-    FrontendRequest,
-    INTERRUPT_SIGNAL,
-)
+
+
+def _read_jsonl(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    lines = path.read_text(encoding="utf-8").splitlines()
+    return [json.loads(line) for line in lines if line.strip()]
+
+
+@contextmanager
+def _preserve_root_logger_state():
+    root_logger = logging.getLogger()
+    original_level = root_logger.level
+    original_handlers = list(root_logger.handlers)
+    original_filters = list(root_logger.filters)
+    try:
+        yield root_logger
+    finally:
+        current_handlers = list(root_logger.handlers)
+        for handler in current_handlers:
+            if handler not in original_handlers:
+                handler.close()
+        root_logger.handlers[:] = original_handlers
+        root_logger.filters[:] = original_filters
+        root_logger.setLevel(original_level)
 
 
 # ============================================================================
@@ -366,6 +397,29 @@ class TestLegacyCompatibilitySerializer:
 class TestMainWithAgentCompatibility:
     """main_with_agent 兼容输出测试"""
 
+    def test_preserve_root_logger_state_restores_handlers_and_level(self, tmp_path: Path):
+        root_logger = logging.getLogger()
+        original_handlers = list(root_logger.handlers)
+        original_level = root_logger.level
+
+        with _preserve_root_logger_state():
+            configure_logging(
+                LoggingConfig(
+                    logs_dir=str(tmp_path),
+                    file=str(tmp_path / "alice_runtime.log"),
+                    dual_write_legacy=False,
+                    enable_colors=False,
+                ),
+                enable_colors=False,
+            )
+            assert not (
+                root_logger.level == original_level
+                and list(root_logger.handlers) == original_handlers
+            )
+
+        assert root_logger.level == original_level
+        assert list(root_logger.handlers) == original_handlers
+
     def test_main_with_agent_initialization_failure_uses_legacy_error_shape(self, capsys):
         """初始化失败时必须输出旧 error 协议"""
 
@@ -380,6 +434,43 @@ class TestMainWithAgentCompatibility:
         assert json.loads(captured.out.strip()) == serialize_error_message(
             content="Initialization failed: boom"
         )
+
+    def test_main_with_agent_initialization_failure_logs_bridge_error_to_tasks_jsonl(self, tmp_path: Path, capsys):
+        """初始化失败时必须保持 legacy error shape，并将 bridge.error 写入 tasks.jsonl。"""
+
+        class FailingAgent:
+            def __init__(self, **kwargs):
+                _ = kwargs
+                raise RuntimeError("boom")
+
+        with _preserve_root_logger_state():
+            configure_logging(
+                LoggingConfig(
+                    logs_dir=str(tmp_path),
+                    file=str(tmp_path / "alice_runtime.log"),
+                    dual_write_legacy=False,
+                    enable_colors=False,
+                ),
+                enable_colors=False,
+            )
+
+            main_with_agent(agent_class=FailingAgent)
+
+        captured = capsys.readouterr()
+        assert json.loads(captured.out.strip()) == serialize_error_message(
+            content="Initialization failed: boom"
+        )
+
+        tasks_records = _read_jsonl(tmp_path / "tasks.jsonl")
+        error_record = next(record for record in tasks_records if record["event_type"] == "bridge.error")
+
+        assert error_record["level"] == "ERROR"
+        assert error_record["source"]
+        assert error_record["context"]["component"] == "bridge_server"
+        assert error_record["data"] == {"phase": "initialization"}
+        assert error_record["error"]["type"] == "RuntimeError"
+        assert error_record["error"]["message"] == "boom"
+        assert "RuntimeError: boom" in error_record["error"]["traceback"]
 
     def test_main_with_agent_runtime_failure_uses_legacy_error_shape(self, capsys):
         """运行失败时必须输出旧 error 协议"""
