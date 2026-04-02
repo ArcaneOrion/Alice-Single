@@ -7,11 +7,20 @@ from types import SimpleNamespace
 
 import pytest
 
+from backend.alice.application.dto.requests import RequestContext, RequestType
+from backend.alice.application.dto.responses import RuntimeEventResponse, RuntimeEventType, StatusType
+from backend.alice.application.workflow.base_workflow import WorkflowContext
+from backend.alice.application.workflow.chat_workflow import ChatWorkflow
+from backend.alice.application.workflow.function_calling_orchestrator import FunctionCallingOrchestrator
 from backend.alice.core.logging.jsonl_logger import JSONLCategoryFileHandler
+from backend.alice.domain.execution.models.execution_result import ExecutionResult
+from backend.alice.domain.execution.services.execution_service import ExecutionService
+from backend.alice.domain.execution.services.tool_registry import ToolRegistry
 from backend.alice.domain.llm.models.message import ChatMessage
 from backend.alice.domain.llm.models.stream_chunk import StreamChunk, TokenUsageUpdate, ToolCallDelta
 from backend.alice.domain.llm.providers.base import BaseLLMProvider, ProviderCapability
 from backend.alice.domain.llm.providers.openai_provider import OpenAIConfig, OpenAIProvider
+from backend.alice.domain.llm.services.chat_service import ChatService
 from backend.alice.domain.llm.services.stream_service import StreamService, build_tool_kwargs
 from backend.alice.infrastructure.bridge.canonical_bridge import CanonicalBridgeEvent, CanonicalEventType
 from backend.alice.infrastructure.bridge.legacy_compatibility_serializer import serialize_canonical_event
@@ -97,6 +106,60 @@ class _DummyToolCallStreamProvider(BaseLLMProvider):
     def _extract_stream_chunks(self, response):
         _ = response
         yield from self._chunks
+
+
+class _WorkflowApiErrorProvider(BaseLLMProvider):
+    def __init__(self) -> None:
+        super().__init__("gpt-4o-mini")
+        self._stream_calls = 0
+
+    def _make_chat_request(
+        self,
+        messages: list[ChatMessage],
+        stream: bool = False,
+        **kwargs,
+    ):
+        _ = messages, stream, kwargs
+        return None
+
+    def _extract_stream_chunks(self, response):
+        _ = response
+        self._stream_calls += 1
+        if self._stream_calls == 1:
+            yield StreamChunk(
+                tool_calls=[
+                    ToolCallDelta(index=0, id="call_api_1", type="function", function_name="run_bash"),
+                ]
+            )
+            yield StreamChunk(
+                tool_calls=[ToolCallDelta(index=0, function_arguments='{"command": "echo failing flow"}')],
+                is_complete=True,
+            )
+            return
+        raise RuntimeError("simulated provider stream failure")
+
+
+class _ObservabilityExecutor:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, bool, dict | None]] = []
+
+    def validate(self, command: str) -> tuple[bool, str]:
+        return True, ""
+
+    def execute(
+        self,
+        command: str,
+        is_python_code: bool = False,
+        log_context: dict | None = None,
+    ) -> ExecutionResult:
+        self.calls.append((command, is_python_code, dict(log_context or {})))
+        return ExecutionResult.success_result("tool output")
+
+    def add_security_rule(self, rule) -> None:
+        _ = rule
+
+    def interrupt(self) -> bool:
+        return False
 
 
 class _FakeRawResponse:
@@ -205,6 +268,17 @@ def _assert_api_context(records: list[dict], *, task_id: str, trace_id: str) -> 
 
 def _find_event(records: list[dict], event_type: str) -> dict:
     return next(record for record in records if record["event_type"] == event_type)
+
+
+def _find_events(records: list[dict], event_type: str) -> list[dict]:
+    return [record for record in records if record["event_type"] == event_type]
+
+
+def _assert_context_fields(record: dict, *, task_id: str, trace_id: str) -> None:
+    context = record.get("context", {})
+    assert context.get("task_id") == task_id
+    assert context.get("trace_id") == trace_id
+    assert context.get("request_id") == trace_id
 
 
 def _tool_call_arguments(record: dict) -> str:
@@ -472,6 +546,115 @@ def test_logging_e2e_tracks_typed_tool_call_aggregation(tmp_path: Path) -> None:
 
 
 @pytest.mark.integration
+def test_logging_e2e_captures_workflow_executor_and_api_error_events(tmp_path: Path) -> None:
+    log_dir = tmp_path / "logs" / "workflow-api-error"
+    _, handler, _ = _build_stream_service(log_dir, _DummyStreamProvider())
+
+    provider = _WorkflowApiErrorProvider()
+    chat_service = ChatService(provider=provider, system_prompt="You are Alice")
+    executor = _ObservabilityExecutor()
+    execution_service = ExecutionService(executor=executor)
+    workflow = ChatWorkflow(
+        chat_service=chat_service,
+        execution_service=execution_service,
+        tool_registry=ToolRegistry(),
+        function_calling_orchestrator=FunctionCallingOrchestrator(execution_service, ToolRegistry()),
+    )
+
+    task_id = "task-workflow-001"
+    trace_id = "trace-workflow-001"
+    responses = list(
+        workflow.execute(
+            WorkflowContext(
+                request_context=RequestContext(
+                    request_type=RequestType.CHAT,
+                    metadata={
+                        "task_id": task_id,
+                        "trace_id": trace_id,
+                        "request_id": trace_id,
+                        "session_id": "session-workflow",
+                    },
+                ),
+                user_input="trigger tool then provider failure",
+            )
+        )
+    )
+
+    _close_handler(handler)
+
+    assert responses
+    assert isinstance(responses[-1], RuntimeEventResponse)
+    assert responses[-1].event_type == RuntimeEventType.ERROR_RAISED
+    assert responses[-1].payload["code"] == "CHAT_ERROR"
+    assert responses[-1].runtime_output is not None
+    assert responses[-1].runtime_output.status == StatusType.ERROR.value
+
+    tasks_records = _read_tasks_records(log_dir)
+    workflow_events = _find_events(tasks_records, "workflow.state_transition")
+    executor_prepared = _find_event(tasks_records, "executor.command_prepared")
+    executor_result = _find_event(tasks_records, "executor.command_result")
+    api_error = _find_event(tasks_records, "api.error")
+
+    assert workflow_events
+    assert len(workflow_events) >= 5
+    assert len(executor.calls) == 1
+    executed_command, executed_is_python, executed_log_context = executor.calls[0]
+    assert executed_command == "echo failing flow"
+    assert executed_is_python is False
+    assert executed_log_context is not None
+    assert executed_log_context["trace_id"] == trace_id
+    assert executed_log_context["request_id"] == trace_id
+    assert executed_log_context["task_id"] == task_id
+    assert executed_log_context["session_id"] == "session-workflow"
+    assert executed_log_context["component"] == "execution_service"
+    assert executed_log_context["phase"] == "docker_execute"
+    assert executed_log_context["span_id"].endswith(".iter1.tool1.docker_execute")
+
+    for record in workflow_events + [executor_prepared, executor_result, api_error]:
+        _assert_required_fields(record)
+        _assert_context_fields(record, task_id=task_id, trace_id=trace_id)
+
+    phases = [record["context"]["phase"] for record in workflow_events]
+    assert phases[:4] == [
+        "iteration_start",
+        "waiting_for_model",
+        "parsing_stream",
+        "tool_detection",
+    ]
+    assert "executing_tools" in phases
+    assert phases[-1] == "iteration_end"
+
+    assert executor_prepared["context"]["component"] == "execution_service"
+    assert executor_prepared["context"]["phase"] == "command_prepared"
+    assert executor_prepared["data"]["command"] == "echo failing flow"
+    assert executor_prepared["data"]["legacy_event_type"] == "tool_call"
+
+    assert executor_result["context"]["component"] == "execution_service"
+    assert executor_result["context"]["phase"] == "command_result"
+    assert executor_result["data"]["status"] == "success"
+    assert executor_result["data"]["legacy_event_type"] == "tool_result"
+
+    assert api_error["level"] == "ERROR"
+    assert api_error["context"]["component"] == "llm.stream_service"
+    assert api_error["context"]["phase"] == "error"
+    assert api_error["data"]["operation"] == "stream_runtime"
+    assert api_error["data"]["chunk_count"] == 0
+    assert api_error["error"]["type"] == "RuntimeError"
+    assert api_error["error"]["message"] == "simulated provider stream failure"
+
+    event_types = [record["event_type"] for record in tasks_records]
+    assert event_types.index("executor.command_prepared") < event_types.index("executor.command_result")
+    assert event_types.index("executor.command_result") < event_types.index("api.error")
+    assert event_types[-1] == "workflow.state_transition"
+    assert workflow_events[-1]["data"]["end_reason"] == "chat_error"
+    assert workflow_events[-1]["error"]["type"] == "RuntimeError"
+    assert workflow_events[-1]["error"]["message"] == "simulated provider stream failure"
+
+    assert not _read_jsonl(log_dir / "system.jsonl")
+    assert not _read_jsonl(log_dir / "changes.jsonl")
+
+
+@pytest.mark.integration
 def test_logging_e2e_tracks_binding_observability_events(tmp_path: Path) -> None:
     log_dir = tmp_path / "logs" / "binding-observability"
     _, handler, _ = _build_stream_service(log_dir, _DummyStreamProvider())
@@ -547,7 +730,7 @@ def test_logging_e2e_tracks_openai_api_request_observability(tmp_path: Path) -> 
         "temperature": 0.2,
     }
     messages = [
-        ChatMessage.system("<runtime_context>\ncurrent_question: where?\nrequest_metadata: {'trace_id': 'trace-request-1'}"),
+        ChatMessage.system("You are Alice\n\nCurrent question: where?"),
         ChatMessage.user("hello provider"),
     ]
 
@@ -590,9 +773,9 @@ def test_logging_e2e_tracks_openai_api_request_observability(tmp_path: Path) -> 
     assert api_request["data"]["message_count"] == 2
     assert api_request["data"]["role_distribution"] == {"system": 1, "user": 1}
     assert api_request["data"]["messages"][0]["role"] == "system"
-    assert "<runtime_context>" in api_request["data"]["messages"][0]["content"]
-    assert "current_question" in api_request["data"]["messages"][0]["content"]
-    assert "request_metadata" in api_request["data"]["messages"][0]["content"]
+    assert "<runtime_context>" not in api_request["data"]["messages"][0]["content"]
+    assert "Current question: where?" in api_request["data"]["messages"][0]["content"]
+    assert "request_metadata" not in api_request["data"]["messages"][0]["content"]
     assert api_request["data"]["payload"]["temperature"] == 0.2
     assert api_request["data"]["payload"]["messages"][1]["content"] == "hello provider"
 

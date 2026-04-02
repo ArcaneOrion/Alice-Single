@@ -207,8 +207,8 @@ class TUIBridge:
 
                 logger.info(f"收到 TUI 输入: {user_input[:100]}...")
 
-                # 处理请求
-                self._process_user_input(user_input)
+                # 通过 callback wrapper 分发请求，保持与 legacy bridge 一致的异常边界
+                self._on_message_received(user_input)
 
             except KeyboardInterrupt:
                 logger.info("接收到键盘中断")
@@ -224,6 +224,14 @@ class TUIBridge:
             self.agent.shutdown()
 
         logger.info("TUI Bridge 主循环结束")
+
+    def _on_message_received(self, message: str) -> None:
+        """通过 callback wrapper 处理消息，保持 legacy 异常边界。"""
+        try:
+            self._process_user_input(message)
+        except Exception as e:
+            logger.error(f"TUI Bridge 回调处理异常: {e}", exc_info=True)
+            self._send_error(f"Error: {str(e)}")
 
     def _process_user_input(self, user_input: str):
         """处理用户输入

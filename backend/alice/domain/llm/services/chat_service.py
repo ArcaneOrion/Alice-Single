@@ -3,7 +3,6 @@
 提供高层聊天接口，封装消息管理和上下文维护。
 """
 
-import json
 import logging
 from collections.abc import Callable, Mapping
 from typing import Any, Protocol
@@ -31,6 +30,44 @@ class ChatService:
 
     提供高层聊天接口，管理消息历史和上下文。
     """
+
+    _MODEL_VISIBLE_CONTEXT_LABELS = {
+        "memory_snapshot": "Memory snapshot",
+        "memory": "Memory snapshot",
+        "skill_snapshot": "Skill snapshot",
+        "skills": "Skill snapshot",
+        "tool_history": "Tool history",
+        "local_time": "Local time",
+    }
+
+    _MODEL_VISIBLE_CONTEXT_ORDER = (
+        "local_time",
+        "memory_snapshot",
+        "memory",
+        "skill_snapshot",
+        "skills",
+        "tool_history",
+    )
+
+    _MODEL_VISIBLE_SCALAR_ORDER = (
+        "current_question",
+        "current_input",
+        "question",
+    )
+
+    _MODEL_VISIBLE_SCALAR_LABELS = {
+        "current_question": "Current question",
+        "current_input": "Current input",
+        "question": "Question",
+    }
+
+    _MODEL_VISIBLE_EXCLUDED_KEYS = {
+        "system",
+        "user",
+        "request_metadata",
+        "metadata",
+        "tools",
+    }
 
     def __init__(
         self,
@@ -98,17 +135,137 @@ class ChatService:
 
         return value
 
-    def _compose_system_prompt(self) -> str:
-        """组合基础系统提示词与结构化运行时上下文。"""
-        base_prompt = (self._base_system_prompt or "").strip()
-        context_payload = self._prune_runtime_context(self._runtime_context)
-        if not context_payload:
-            return base_prompt
+    @staticmethod
+    def _format_mapping_lines(value: Mapping[str, Any], indent: int = 2) -> list[str]:
+        lines: list[str] = []
+        prefix = " " * indent
+        for key, item in value.items():
+            if isinstance(item, Mapping):
+                nested = ChatService._format_mapping_lines(item, indent + 2)
+                if not nested:
+                    continue
+                lines.append(f"{prefix}{key}:")
+                lines.extend(nested)
+                continue
+            if isinstance(item, list):
+                nested = ChatService._format_list_lines(item, indent + 2)
+                if not nested:
+                    continue
+                lines.append(f"{prefix}{key}:")
+                lines.extend(nested)
+                continue
+            if item in (None, "", [], {}):
+                continue
+            lines.append(f"{prefix}{key}: {item}")
+        return lines
 
-        runtime_block = json.dumps(context_payload, ensure_ascii=False, indent=2)
-        if base_prompt:
-            return f"{base_prompt}\n\n<runtime_context>\n{runtime_block}\n</runtime_context>"
-        return f"<runtime_context>\n{runtime_block}\n</runtime_context>"
+    @staticmethod
+    def _format_list_lines(value: list[Any], indent: int = 2) -> list[str]:
+        lines: list[str] = []
+        prefix = " " * indent
+        for item in value:
+            if isinstance(item, Mapping):
+                nested = ChatService._format_mapping_lines(item, indent + 2)
+                if not nested:
+                    continue
+                lines.append(f"{prefix}-")
+                lines.extend(nested)
+                continue
+            if isinstance(item, list):
+                nested = ChatService._format_list_lines(item, indent + 2)
+                if not nested:
+                    continue
+                lines.append(f"{prefix}-")
+                lines.extend(nested)
+                continue
+            if item in (None, "", [], {}):
+                continue
+            lines.append(f"{prefix}- {item}")
+        return lines
+
+    @staticmethod
+    def _format_context_block(label: str, value: Any) -> str:
+        if isinstance(value, Mapping):
+            lines = ChatService._format_mapping_lines(value)
+            if not lines:
+                return ""
+            return f"{label}:\n" + "\n".join(lines)
+
+        if isinstance(value, list):
+            lines = ChatService._format_list_lines(value)
+            if not lines:
+                return ""
+            return f"{label}:\n" + "\n".join(lines)
+
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return ""
+            return f"{label}: {text}"
+
+        if value in (None, "", [], {}):
+            return ""
+        return f"{label}: {value}"
+
+    @classmethod
+    def _render_model_visible_context(cls, runtime_context: dict[str, Any] | None) -> str:
+        context_payload = cls._prune_runtime_context(runtime_context or {})
+        if not context_payload or not isinstance(context_payload, dict):
+            return ""
+
+        visible_lines: list[str] = []
+
+        user_payload = context_payload.get("user")
+        if isinstance(user_payload, Mapping):
+            for key in cls._MODEL_VISIBLE_SCALAR_ORDER:
+                value = user_payload.get(key)
+                if isinstance(value, str) and value.strip():
+                    visible_lines.append(f"{cls._MODEL_VISIBLE_SCALAR_LABELS[key]}: {value.strip()}")
+            local_time = user_payload.get("local_time")
+            if isinstance(local_time, Mapping):
+                block = cls._format_context_block("Local time", local_time)
+                if block:
+                    visible_lines.append(block)
+
+        for key in cls._MODEL_VISIBLE_CONTEXT_ORDER:
+            if key == "local_time" and isinstance(user_payload, Mapping):
+                continue
+            value = context_payload.get(key)
+            if key not in cls._MODEL_VISIBLE_CONTEXT_LABELS:
+                continue
+            block = cls._format_context_block(cls._MODEL_VISIBLE_CONTEXT_LABELS[key], value)
+            if block:
+                visible_lines.append(block)
+
+        for key, value in context_payload.items():
+            if key in cls._MODEL_VISIBLE_CONTEXT_ORDER or key in cls._MODEL_VISIBLE_EXCLUDED_KEYS:
+                continue
+            if key in cls._MODEL_VISIBLE_SCALAR_ORDER and isinstance(value, str) and value.strip():
+                visible_lines.append(f"{cls._MODEL_VISIBLE_SCALAR_LABELS[key]}: {value.strip()}")
+                continue
+            block = cls._format_context_block(key.replace("_", " ").title(), value)
+            if block:
+                visible_lines.append(block)
+
+        return "\n\n".join(visible_lines)
+
+    @classmethod
+    def _compose_prompt_with_context(
+        cls,
+        base_prompt: str,
+        runtime_context: dict[str, Any] | None,
+    ) -> str:
+        base_prompt = (base_prompt or "").strip()
+        model_visible_context = cls._render_model_visible_context(runtime_context)
+        if base_prompt and model_visible_context:
+            return f"{base_prompt}\n\n{model_visible_context}"
+        if model_visible_context:
+            return model_visible_context
+        return base_prompt
+
+    def _compose_system_prompt(self) -> str:
+        """组合基础系统提示词与模型可见上下文。"""
+        return self._compose_prompt_with_context(self._base_system_prompt, self._runtime_context)
 
     def _sync_system_message(self) -> None:
         """同步系统消息到消息列表首位。"""
@@ -154,7 +311,7 @@ class ChatService:
 
         composed_prompt = self._compose_system_prompt_for(runtime_context)
         if not composed_prompt:
-            return list(self._messages)
+            return [message for message in self._messages if message.role != "system"]
 
         request_messages = list(self._messages)
         system_message = ChatMessage.system(composed_prompt)
@@ -171,12 +328,20 @@ class ChatService:
         envelope = self._request_envelope_to_dict(request_envelope)
         if envelope is None:
             return list(self._messages)
-        system_prompt = str(((envelope.get("system") or {}).get("prompt")) or self._base_system_prompt or "")
+
+        system_payload = envelope.get("system")
+        system_prompt = self._base_system_prompt or ""
+        if isinstance(system_payload, Mapping):
+            prompt = system_payload.get("prompt")
+            if isinstance(prompt, str):
+                system_prompt = prompt
+
         model_context = envelope.get("model_context")
         runtime_context = dict(model_context) if isinstance(model_context, Mapping) else {}
         tool_history = envelope.get("tool_history")
         if isinstance(tool_history, list) and tool_history:
             runtime_context["tool_history"] = list(tool_history)
+
         system_prompt = self._compose_system_prompt_for(runtime_context, base_prompt=system_prompt)
         request_messages: list[ChatMessage] = []
         if system_prompt:
@@ -209,15 +374,7 @@ class ChatService:
         base_prompt: str | None = None,
     ) -> str:
         base_prompt_value = self._base_system_prompt if base_prompt is None else base_prompt
-        base_prompt = (base_prompt_value or "").strip()
-        context_payload = self._prune_runtime_context(runtime_context or {})
-        if not context_payload:
-            return base_prompt
-
-        runtime_block = json.dumps(context_payload, ensure_ascii=False, indent=2)
-        if base_prompt:
-            return f"{base_prompt}\n\n<runtime_context>\n{runtime_block}\n</runtime_context>"
-        return f"<runtime_context>\n{runtime_block}\n</runtime_context>"
+        return self._compose_prompt_with_context(base_prompt_value or "", runtime_context)
 
     def add_message(self, message: ChatMessage) -> None:
         """添加消息

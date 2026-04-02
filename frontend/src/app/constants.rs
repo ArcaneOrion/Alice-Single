@@ -2,9 +2,9 @@
 //!
 //! 定义 TUI 应用中使用的各种常量。
 
-/// # 旋转指示器常量
-///
-/// 用于显示加载状态的旋转动画字符序列。
+// # 旋转指示器常量
+//
+// 用于显示加载状态的旋转动画字符序列。
 
 /// 旋转指示器帧序列
 ///
@@ -14,9 +14,9 @@ pub const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", 
 /// 旋转指示器帧数
 pub const SPINNER_FRAME_COUNT: usize = SPINNER_FRAMES.len();
 
-/// # 定时器常量
-///
-/// 控制定时器事件和动画更新频率。
+// # 定时器常量
+//
+// 控制定时器事件和动画更新频率。
 
 /// 默认 tick 间隔（毫秒）
 ///
@@ -29,9 +29,9 @@ pub const FAST_TICK_RATE_MS: u64 = 50;
 /// 较慢的 tick 间隔（毫秒）- 用于节省资源
 pub const SLOW_TICK_RATE_MS: u64 = 200;
 
-/// # UI 布局常量
-///
-/// 定义 TUI 各区域的大小和比例。
+// # UI 布局常量
+//
+// 定义 TUI 各区域的大小和比例。
 
 /// Header 区域高度（行数）
 pub const HEADER_HEIGHT: u16 = 3;
@@ -54,9 +54,9 @@ pub const MIN_CHAT_WIDTH: u16 = 20;
 /// 最小侧边栏宽度（字符数）
 pub const MIN_SIDEBAR_WIDTH: u16 = 15;
 
-/// # 滚动常量
-///
-/// 控制滚动行为和边界。
+// # 滚动常量
+//
+// 控制滚动行为和边界。
 
 /// 最大滚动偏移限制
 ///
@@ -69,9 +69,9 @@ pub const DEFAULT_SCROLL_STEP: usize = 1;
 /// Page Up/Down 滚动步长（行数）
 pub const PAGE_SCROLL_STEP: usize = 10;
 
-/// # 消息常量
-///
-/// 控制消息队列和显示相关限制。
+// # 消息常量
+//
+// 控制消息队列和显示相关限制。
 
 /// 默认最大消息保留数量
 pub const DEFAULT_MAX_MESSAGES: usize = 1000;
@@ -85,10 +85,10 @@ pub const MAX_MESSAGE_LENGTH: usize = 100_000;
 /// 消息内容截断长度（用于预览）
 pub const MESSAGE_PREVIEW_LENGTH: usize = 100;
 
-/// # 颜色常量
-///
-/// 虽然实际颜色由 ratatui 的 Color 枚举定义，
-/// 这里定义一些语义化的颜色名称映射。
+// # 颜色常量
+//
+// 虽然实际颜色由 ratatui 的 Color 枚举定义，
+// 这里定义一些语义化的颜色名称映射。
 
 /// 默认文本颜色
 pub const COLOR_DEFAULT_TEXT: &str = "white";
@@ -108,9 +108,9 @@ pub const COLOR_INPUT_READY: &str = "yellow";
 /// 输入框文本颜色（忙碌状态）
 pub const COLOR_INPUT_BUSY: &str = "darkgray";
 
-/// # 状态文本常量
-///
-/// 各状态对应的显示文本。
+// # 状态文本常量
+//
+// 各状态对应的显示文本。
 
 /// 初始欢迎消息
 pub const MSG_WELCOME_INIT: &str = "你好！我是你的智能助手 Alice。系统正在初始化...";
@@ -127,7 +127,7 @@ pub const MSG_PROCESSING_PLACEHOLDER: &str = "正在处理中...";
 /// 暂无思考内容提示
 pub const MSG_NO_THINKING: &str = "暂无思考过程...";
 
-/// # 输入提示文本常量
+// # 输入提示文本常量
 
 /// 输入框标题（就绪状态）
 pub const INPUT_TITLE_READY: &str = " 输入消息 (Enter 发送, Ctrl+C 退出) ";
@@ -141,7 +141,7 @@ pub const SIDEBAR_HINT_HIDDEN: &str = "隐藏思考过程 (Ctrl+O 显示)";
 /// 侧边栏切换提示（显示状态）
 pub const SIDEBAR_HINT_SHOWN: &str = "显示思考过程 (Ctrl+O 隐藏)";
 
-/// # 状态文本模板
+// # 状态文本模板
 
 /// 标题文本
 pub const HEADER_TITLE: &str = " ALICE ASSISTANT ";
@@ -155,7 +155,7 @@ pub const CHAT_HISTORY_TITLE: &str = " 对话历史 ";
 /// 思考侧边栏标题
 pub const THINKING_TITLE_BASE: &str = " 💭 ";
 
-/// # 作者显示名称
+// # 作者显示名称
 
 /// 用户消息前缀
 pub const AUTHOR_USER_PREFIX: &str = " 你: ";
@@ -163,7 +163,7 @@ pub const AUTHOR_USER_PREFIX: &str = " 你: ";
 /// 助手消息前缀
 pub const AUTHOR_ASSISTANT_PREFIX: &str = " Alice: ";
 
-/// # 单元测试
+// # 单元测试
 
 #[cfg(test)]
 mod tests {
@@ -176,6 +176,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::assertions_on_constants)]
     fn test_tick_rate_values() {
         assert!(DEFAULT_TICK_RATE_MS > 0);
         assert!(FAST_TICK_RATE_MS < DEFAULT_TICK_RATE_MS);
@@ -197,6 +198,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::assertions_on_constants)]
     fn test_message_limits() {
         assert!(DEFAULT_MAX_MESSAGES > PRUNE_KEEP_MESSAGE_COUNT);
         assert!(MAX_MESSAGE_LENGTH > MESSAGE_PREVIEW_LENGTH);

@@ -15,12 +15,15 @@ use crate::{
             CHAT_WIDTH_PERCENTAGE_WHEN_SIDEBAR_HIDDEN, CHAT_WIDTH_PERCENTAGE_WHEN_SIDEBAR_SHOWN,
             HEADER_HEIGHT, INPUT_HEIGHT, SIDEBAR_WIDTH_PERCENTAGE,
         },
-        state::{AgentStatus as AppAgentStatus, App, AreaBounds, Author as AppAuthor, Message as AppMessage},
+        state::{
+            AgentStatus as AppAgentStatus, App, AreaBounds, Author as AppAuthor,
+            Message as AppMessage,
+        },
     },
     ui::component::{
-        AgentStatus as HeaderAgentStatus, ChatViewConfig, ChatViewState, HeaderConfig,
-        InputBoxConfig, Message as ChatMessage, SidebarConfig, Author as ChatAuthor,
-        render_chat_view, render_header, render_input_box, render_sidebar,
+        AgentStatus as HeaderAgentStatus, Author as ChatAuthor, ChatViewConfig, ChatViewState,
+        HeaderConfig, InputBoxConfig, Message as ChatMessage, SidebarConfig, render_chat_view,
+        render_header, render_input_box, render_sidebar,
     },
 };
 
@@ -133,7 +136,11 @@ fn build_layout(area: Rect, show_thinking: bool) -> AppLayout {
     AppLayout {
         header_area: vertical[0],
         chat_area: main[0],
-        sidebar_area: if show_thinking { main[1] } else { Rect::default() },
+        sidebar_area: if show_thinking {
+            main[1]
+        } else {
+            Rect::default()
+        },
         input_area: vertical[2],
     }
 }

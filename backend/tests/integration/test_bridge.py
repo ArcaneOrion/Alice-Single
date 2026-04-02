@@ -785,6 +785,52 @@ class TestDualEntryInterruptParity:
         assert new_entry_messages == [serialize_status_message("done")]
         assert old_entry_transport.sent_messages == new_entry_messages
 
+    def test_tui_bridge_midstream_interrupt_stops_forwarding_before_second_chunk(self, capsys):
+        new_entry_agent = MagicMock()
+        new_entry_bridge = TUIBridge()
+        new_entry_bridge.agent = new_entry_agent
+
+        def new_entry_stream(user_input):
+            assert user_input == "hello"
+            yield ContentResponse(content="first")
+            new_entry_bridge.input_queue.put(INTERRUPT_SIGNAL)
+            yield ContentResponse(content="second")
+
+        new_entry_agent.chat.side_effect = new_entry_stream
+
+        new_entry_bridge._process_user_input("hello")
+        new_entry_captured = capsys.readouterr()
+        new_entry_messages = [
+            json.loads(line)
+            for line in new_entry_captured.out.splitlines()
+            if line.strip()
+        ]
+
+        old_entry_transport = _RecordingTransport()
+        old_entry_agent = MagicMock()
+        old_entry_server = BridgeServer(agent=old_entry_agent, transport=old_entry_transport)
+
+        def old_entry_stream(user_input):
+            assert user_input == "hello"
+            yield ContentResponse(content="first")
+            old_entry_transport.seed_pending_interrupt()
+            yield ContentResponse(content="second")
+
+        old_entry_agent.chat.side_effect = old_entry_stream
+
+        old_entry_server.message_handler.handle_input("hello")
+        old_entry_server.interrupt_handler.check_interrupt()
+
+        new_entry_agent.chat.assert_called_once_with("hello")
+        old_entry_agent.chat.assert_called_once_with("hello")
+        new_entry_agent.interrupt.assert_called_once_with()
+        old_entry_agent.interrupt.assert_called_once_with()
+        assert new_entry_messages == [
+            {"type": "content", "content": "first"},
+            serialize_status_message("done"),
+        ]
+        assert old_entry_transport.sent_messages == new_entry_messages
+
 
 class TestDualEntryFailureParity:
     """新旧入口在同一 handler failure 路径上必须输出一致的 legacy error。"""
@@ -814,6 +860,82 @@ class TestDualEntryFailureParity:
         old_entry_agent.chat.assert_called_once_with("hello")
         assert new_entry_messages == [serialize_error_message(content="Processing error: boom")]
         assert old_entry_transport.sent_messages == new_entry_messages
+
+    def test_tui_bridge_run_callback_failure_matches_legacy_on_message_received_error(self, capsys):
+        with patch.object(TUIBridge, "_start_stdin_reader", return_value=None):
+            new_entry_bridge = TUIBridge()
+        new_entry_bridge.agent = MagicMock()
+        new_entry_bridge.input_queue.put("hello")
+        new_entry_bridge.input_queue.put(None)
+
+        with patch.object(new_entry_bridge, "_process_user_input", side_effect=RuntimeError("boom")):
+            new_entry_bridge.run()
+
+        new_entry_captured = capsys.readouterr()
+        new_entry_messages = [
+            json.loads(line)
+            for line in new_entry_captured.out.splitlines()
+            if line.strip()
+        ]
+        new_entry_errors = [
+            message
+            for message in new_entry_messages
+            if message["type"] == MessageType.ERROR
+        ]
+
+        old_entry_transport = _RecordingTransport()
+        old_entry_server = BridgeServer(agent=MagicMock(), transport=old_entry_transport)
+
+        with patch.object(old_entry_server.message_handler, "handle_input", side_effect=RuntimeError("boom")):
+            old_entry_server._on_message_received("hello")
+
+        assert old_entry_transport.sent_messages == [serialize_error_message(content="Error: boom")]
+        assert new_entry_errors == old_entry_transport.sent_messages
+
+    def test_tui_bridge_run_callback_failure_emits_callback_level_legacy_error(self, capsys):
+        with patch.object(TUIBridge, "_start_stdin_reader", return_value=None):
+            bridge = TUIBridge()
+        bridge.agent = MagicMock()
+        bridge.input_queue.put("hello")
+        bridge.input_queue.put(None)
+
+        with patch.object(bridge, "_process_user_input", side_effect=RuntimeError("boom")):
+            bridge.run()
+
+        captured = capsys.readouterr()
+        stdout_messages = [json.loads(line) for line in captured.out.splitlines() if line.strip()]
+
+        assert stdout_messages == [
+            serialize_status_message("ready"),
+            serialize_error_message(content="Error: boom"),
+        ]
+
+    def test_tui_bridge_run_continues_after_callback_failure(self, capsys):
+        with patch.object(TUIBridge, "_start_stdin_reader", return_value=None):
+            bridge = TUIBridge()
+        bridge.agent = MagicMock()
+        bridge.input_queue.put("first")
+        bridge.input_queue.put("second")
+        bridge.input_queue.put(None)
+
+        processed_messages: list[str] = []
+
+        def _process(message: str) -> None:
+            processed_messages.append(message)
+            if message == "first":
+                raise RuntimeError("boom")
+
+        with patch.object(bridge, "_process_user_input", side_effect=_process):
+            bridge.run()
+
+        captured = capsys.readouterr()
+        stdout_messages = [json.loads(line) for line in captured.out.splitlines() if line.strip()]
+
+        assert processed_messages == ["first", "second"]
+        assert stdout_messages == [
+            serialize_status_message("ready"),
+            serialize_error_message(content="Error: boom"),
+        ]
 
 
 class TestProtocolCompatibility:

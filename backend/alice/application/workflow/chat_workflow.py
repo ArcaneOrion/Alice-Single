@@ -22,7 +22,6 @@ from ..dto import (
     StructuredToolResult,
 )
 from backend.alice.domain.execution.services.tool_registry import ToolRegistry
-from backend.alice.domain.llm.parsers.stream_parser import StreamParser
 from backend.alice.domain.llm.services.stream_service import (
     StreamService,
     build_tool_kwargs,
@@ -62,7 +61,6 @@ class ChatWorkflow(Workflow):
         chat_service=None,
         execution_service=None,
         stream_service: StreamService | None = None,
-        stream_parser: Optional[StreamParser] = None,
         tool_registry: Optional[ToolRegistry] = None,
         function_calling_orchestrator: FunctionCallingOrchestrator | None = None,
         max_iterations: int = 10,
@@ -72,7 +70,6 @@ class ChatWorkflow(Workflow):
         self.stream_service = stream_service or (
             StreamService(provider=chat_service.provider) if chat_service is not None else None
         )
-        self.stream_parser = stream_parser or StreamParser()
         self.tool_registry = tool_registry or ToolRegistry()
         self.function_calling_orchestrator = function_calling_orchestrator or (
             FunctionCallingOrchestrator(execution_service, self.tool_registry)
@@ -273,9 +270,43 @@ class ChatWorkflow(Workflow):
             else dict(request_metadata.get("runtime_context") or {})
         )
 
+        request_context_provider_metadata = {
+            "trace_id": str(request_metadata.get("trace_id") or request_metadata.get("request_id") or ""),
+            "request_id": str(request_metadata.get("request_id") or request_metadata.get("trace_id") or ""),
+            "task_id": str(
+                request_metadata.get("task_id")
+                or request_metadata.get("request_id")
+                or request_metadata.get("session_id")
+                or ""
+            ),
+            "session_id": str(request_metadata.get("session_id") or ""),
+            "span_id": str(request_metadata.get("span_id") or ""),
+        }
+
+        def build_provider_metadata(iteration_request_envelope: RequestEnvelope | None) -> dict[str, Any]:
+            if iteration_request_envelope is None:
+                return request_context_provider_metadata
+            envelope_metadata = iteration_request_envelope.request_metadata.to_dict()
+            return {
+                "trace_id": str(envelope_metadata.get("trace_id") or request_context_provider_metadata["trace_id"]),
+                "request_id": str(envelope_metadata.get("request_id") or request_context_provider_metadata["request_id"]),
+                "task_id": str(envelope_metadata.get("task_id") or request_context_provider_metadata["task_id"]),
+                "session_id": str(
+                    envelope_metadata.get("session_id") or request_context_provider_metadata["session_id"]
+                ),
+                "span_id": str(envelope_metadata.get("span_id") or request_context_provider_metadata["span_id"]),
+            }
+
         def build_iteration_request_envelope() -> RequestEnvelope | None:
-            if active_request_envelope is not None and iteration == 1:
-                return active_request_envelope
+            if active_request_envelope is not None:
+                return RequestEnvelope(
+                    system_prompt=active_request_envelope.system_prompt,
+                    messages=[message.to_dict() for message in chat_service.messages if message.role != "system"],
+                    model_context=dict(active_request_envelope.model_context),
+                    tools={category: list(items) for category, items in active_request_envelope.tools.items()},
+                    request_metadata=active_request_envelope.request_metadata,
+                    tool_history=list(active_request_envelope.tool_history),
+                )
             if active_runtime_context is None:
                 return None
             return RequestEnvelope(
@@ -290,6 +321,7 @@ class ChatWorkflow(Workflow):
                 request_metadata=active_runtime_context.request_metadata,
                 tool_history=list(active_runtime_context.tool_history),
             )
+
 
         iteration = 0
         while iteration < self.max_iterations:
@@ -356,10 +388,11 @@ class ChatWorkflow(Workflow):
                     runtime_context_payload,
                     request_envelope=iteration_request_envelope,
                 )
+                provider_request_metadata = build_provider_metadata(iteration_request_envelope)
                 request_kwargs = build_tool_kwargs(
                     self.chat_service.provider,
                     tools,
-                    metadata=request_metadata,
+                    metadata=provider_request_metadata,
                     request_envelope=request_envelope_payload,
                 )
                 log_transition(

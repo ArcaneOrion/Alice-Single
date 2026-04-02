@@ -110,6 +110,21 @@ class MessageHandler:
         try:
             self._processing = True
             for response in agent.chat(user_input):
+                if self.server.interrupt_handler.check_interrupt():
+                    logger.info(
+                        "Bridge handler stopped forwarding due to interrupt",
+                        extra=_handler_log_extra(
+                            "bridge.interrupt",
+                            data={
+                                "phase": "handle_input",
+                                "forwarded_messages": forwarded_messages,
+                                "skipped_responses": skipped_responses,
+                                "action": "stop_forwarding",
+                            },
+                        ),
+                    )
+                    return
+
                 data = _serialize_response(response)
                 if data is None:
                     skipped_responses += 1

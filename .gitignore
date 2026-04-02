@@ -8,7 +8,7 @@ tmp/
 alice-ui/node_modules/
 alice-ui/dist/
 alice-ui/.vite/
-
+.codex
 .clinerules
 
 memory/

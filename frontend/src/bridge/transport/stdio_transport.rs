@@ -26,8 +26,8 @@ use std::process::{Child, ChildStdin, Stdio};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
-use crate::bridge::protocol::codec::JsonLinesCodec;
 use crate::bridge::BridgeMessage;
+use crate::bridge::protocol::codec::JsonLinesCodec;
 use crate::util::runtime_log::runtime_log;
 
 fn summarize_text(text: &str, limit: usize) -> String {
@@ -179,7 +179,11 @@ impl StdioTransport {
 
         // 启动 stdout 读取线程
         thread::spawn(move || {
-            runtime_log("bridge.transport", "system.start", "phase=stdout_reader.start");
+            runtime_log(
+                "bridge.transport",
+                "system.start",
+                "phase=stdout_reader.start",
+            );
             let codec = JsonLinesCodec::new();
             let reader = BufReader::new(stdout);
             for line_result in reader.lines() {
@@ -194,9 +198,7 @@ impl StdioTransport {
                                     "bridge.message_received",
                                     &format!(
                                         "direction=backend->frontend message_type={} payload_length={} summary={}",
-                                        message_type,
-                                        line_len,
-                                        summary
+                                        message_type, line_len, summary
                                     ),
                                 );
                                 if tx.send(msg).is_err() {
@@ -231,12 +233,20 @@ impl StdioTransport {
                 }
             }
             runtime_log("bridge.transport", "bridge.eof", "phase=stdout_reader.eof");
-            runtime_log("bridge.transport", "system.shutdown", "phase=stdout_reader.stop");
+            runtime_log(
+                "bridge.transport",
+                "system.shutdown",
+                "phase=stdout_reader.stop",
+            );
         });
 
         // 启动 stderr 读取线程
         thread::spawn(move || {
-            runtime_log("bridge.transport", "system.start", "phase=stderr_reader.start");
+            runtime_log(
+                "bridge.transport",
+                "system.start",
+                "phase=stderr_reader.start",
+            );
             let reader = BufReader::new(stderr);
             for line_result in reader.lines() {
                 match line_result {
@@ -272,7 +282,11 @@ impl StdioTransport {
                 }
             }
             runtime_log("bridge.transport", "bridge.eof", "phase=stderr_reader.eof");
-            runtime_log("bridge.transport", "system.shutdown", "phase=stderr_reader.stop");
+            runtime_log(
+                "bridge.transport",
+                "system.shutdown",
+                "phase=stderr_reader.stop",
+            );
         });
 
         Ok((
@@ -356,7 +370,11 @@ impl StdioTransport {
         );
         let result = self.child.kill();
         if let Err(err) = &result {
-            runtime_log("bridge.transport", "bridge.error", &format!("phase=backend.kill error={}", err));
+            runtime_log(
+                "bridge.transport",
+                "bridge.error",
+                &format!("phase=backend.kill error={}", err),
+            );
         } else {
             runtime_log(
                 "bridge.transport",

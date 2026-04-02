@@ -137,14 +137,13 @@ impl MouseHandler {
     /// - 最后检查输入区
     pub fn detect_area(&self, x: u16, y: u16) -> UiArea {
         // 检查侧边栏
-        if self.show_thinking {
-            if x >= self.sidebar_area.x
-                && x < self.sidebar_area.x + self.sidebar_area.width
-                && y >= self.sidebar_area.y
-                && y < self.sidebar_area.y + self.sidebar_area.height
-            {
-                return UiArea::Sidebar;
-            }
+        if self.show_thinking
+            && x >= self.sidebar_area.x
+            && x < self.sidebar_area.x + self.sidebar_area.width
+            && y >= self.sidebar_area.y
+            && y < self.sidebar_area.y + self.sidebar_area.height
+        {
+            return UiArea::Sidebar;
         }
 
         // 检查聊天区

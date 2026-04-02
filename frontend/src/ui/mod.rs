@@ -14,5 +14,5 @@ pub use component::{
 };
 
 // 重新导出工具函数
-pub use util::format_text_to_lines;
 pub use screen::render_app;
+pub use util::format_text_to_lines;

@@ -622,7 +622,7 @@ mod tests {
 
         dispatcher.set_show_thinking(true);
         // 测试是否正确设置（通过检查鼠标处理器）
-        assert!(dispatcher.mouse().is_in_sidebar_area(100, 100) == false); // 默认区域
+        assert!(!dispatcher.mouse().is_in_sidebar_area(100, 100)); // 默认区域
     }
 
     #[test]

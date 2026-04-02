@@ -383,10 +383,10 @@ class TestStructuredRuntimeIntegration:
 
         assert runtime_context["memory"]["working"] == "working notes"
         assert chat_service.messages[0].role == "system"
-        assert "<runtime_context>" in chat_service.messages[0].content
-        assert '"working": "working notes"' in chat_service.messages[0].content
-        assert '"long_term": "long term memory"' in chat_service.messages[0].content
-        assert '"summary": "toolkit, memory"' in chat_service.messages[0].content
+        assert "<runtime_context>" not in chat_service.messages[0].content
+        assert "working notes" in chat_service.messages[0].content
+        assert "long term memory" in chat_service.messages[0].content
+        assert "toolkit, memory" in chat_service.messages[0].content
         assert '"short_term"' not in chat_service.messages[0].content
 
     @pytest.mark.integration
@@ -425,13 +425,15 @@ class TestStructuredRuntimeIntegration:
         assert messages[1].role == "user"
         assert messages[1].content == "hello"
         assert "【记忆与背景信息注入】" not in messages[1].content
-        assert '"working": "working memory"' in messages[0].content
-        assert '"short_term": "short term memory"' in messages[0].content
-        assert '"long_term": "long term memory"' in messages[0].content
-        assert '"summary": "toolkit, memory"' in messages[0].content
-        assert '"builtin_system_tools"' in messages[0].content
-        assert '"terminal_commands"' in messages[0].content
-        assert '"code_execution"' in messages[0].content
+        assert "working: working memory" in messages[0].content
+        assert "short_term: short term memory" in messages[0].content
+        assert "long_term: long term memory" in messages[0].content
+        assert "summary: toolkit, memory" in messages[0].content
+        assert "builtin_system_tools" not in messages[0].content
+        assert "terminal_commands" not in messages[0].content
+        assert "code_execution" not in messages[0].content
+        assert "Memory snapshot:" in messages[0].content
+        assert "Skill snapshot:" in messages[0].content
         assert orchestration.runtime_context["tools"]["builtin_system_tools"]
         assert orchestration.runtime_context["tools"]["terminal_commands"][0]["tool_id"] == "run_bash"
         assert orchestration.runtime_context["tools"]["code_execution"][0]["tool_id"] == "run_python"

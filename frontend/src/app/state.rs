@@ -163,7 +163,7 @@ pub struct App {
 /// UI 区域边界信息
 ///
 /// 记录各 UI 组件的屏幕区域，用于事件分发和碰撞检测。
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct AreaBounds {
     /// 聊天区域
     pub chat_area: Rect,
@@ -171,16 +171,6 @@ pub struct AreaBounds {
     pub sidebar_area: Rect,
     /// 输入区域
     pub input_area: Rect,
-}
-
-impl Default for AreaBounds {
-    fn default() -> Self {
-        Self {
-            chat_area: Rect::default(),
-            sidebar_area: Rect::default(),
-            input_area: Rect::default(),
-        }
-    }
 }
 
 impl App {
@@ -319,7 +309,7 @@ impl App {
     /// 发送中断信号
     pub fn interrupt(&mut self) -> bool {
         if self.status.is_processing() {
-            if let Err(_) = self.bridge_client.send_interrupt() {
+            if self.bridge_client.send_interrupt().is_err() {
                 return false;
             }
             return true;

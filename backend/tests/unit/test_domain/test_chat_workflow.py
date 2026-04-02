@@ -5,6 +5,7 @@ import pytest
 
 from backend.alice.application.dto.requests import RequestContext, RequestType
 from backend.alice.application.dto.responses import RuntimeEventResponse, RuntimeEventType, ResponseType, StatusType
+from backend.alice.application.runtime.models import RequestEnvelope, RequestMetadata
 from backend.alice.application.workflow.base_workflow import WorkflowContext
 from backend.alice.application.workflow.chat_workflow import ChatWorkflow
 from backend.alice.domain.execution.models.execution_result import ExecutionResult
@@ -214,6 +215,131 @@ def test_chat_workflow_emits_tool_result_metadata_for_failure_types() -> None:
 
 
 @pytest.mark.unit
+def test_chat_workflow_prefers_request_envelope_metadata_and_avoids_runtime_context_metadata_duplication() -> None:
+    provider = _ToolCallStreamProvider()
+    chat_service = ChatService(provider=provider, system_prompt="You are Alice")
+    orchestrator = MagicMock()
+    orchestration_result = MagicMock()
+    orchestration_result.assistant_message = MagicMock()
+    orchestration_result.tool_messages = []
+    orchestration_result.execution_results = []
+    orchestrator.execute_tool_calls.return_value = orchestration_result
+
+    workflow = ChatWorkflow(
+        chat_service=chat_service,
+        execution_service=MagicMock(),
+        function_calling_orchestrator=orchestrator,
+    )
+
+    request_envelope = RequestEnvelope(
+        system_prompt="You are Alice",
+        messages=[],
+        model_context={"memory_snapshot": {"working": "notes"}},
+        request_metadata=RequestMetadata(
+            trace_id="trace-envelope",
+            request_id="req-envelope",
+            task_id="task-envelope",
+            session_id="session-envelope",
+            span_id="span-envelope",
+        ),
+    )
+    context = WorkflowContext(
+        request_context=RequestContext(
+            request_type=RequestType.CHAT,
+            metadata={
+                "trace_id": "trace-request",
+                "request_id": "req-request",
+                "task_id": "task-request",
+                "session_id": "session-request",
+                "span_id": "span-request",
+                "runtime_context": {"request_metadata": {"trace_id": "trace-request"}},
+            },
+        ),
+        user_input="run something",
+        request_envelope=request_envelope,
+    )
+
+    list(workflow.execute(context))
+
+    assert provider.captured_kwargs is not None
+    assert provider.captured_kwargs["request_envelope"]["request_metadata"] == {
+        "session_id": "session-envelope",
+        "trace_id": "trace-envelope",
+        "request_id": "req-envelope",
+        "task_id": "task-envelope",
+        "span_id": "span-envelope",
+        "enable_thinking": True,
+        "stream": True,
+    }
+    assert provider.captured_kwargs["metadata"] == {
+        "trace_id": "trace-envelope",
+        "request_id": "req-envelope",
+        "task_id": "task-envelope",
+        "session_id": "session-envelope",
+        "span_id": "span-envelope",
+    }
+    assert "runtime_context" not in provider.captured_kwargs["metadata"]
+
+
+@pytest.mark.unit
+def test_chat_workflow_falls_back_to_request_context_metadata_when_request_envelope_metadata_missing() -> None:
+    provider = _ToolCallStreamProvider()
+    chat_service = ChatService(provider=provider, system_prompt="You are Alice")
+    orchestrator = MagicMock()
+    orchestration_result = MagicMock()
+    orchestration_result.assistant_message = MagicMock()
+    orchestration_result.tool_messages = []
+    orchestration_result.execution_results = []
+    orchestrator.execute_tool_calls.return_value = orchestration_result
+
+    workflow = ChatWorkflow(
+        chat_service=chat_service,
+        execution_service=MagicMock(),
+        function_calling_orchestrator=orchestrator,
+    )
+
+    request_envelope = RequestEnvelope(
+        system_prompt="You are Alice",
+        messages=[],
+        request_metadata=RequestMetadata(),
+    )
+    context = WorkflowContext(
+        request_context=RequestContext(
+            request_type=RequestType.CHAT,
+            metadata={
+                "trace_id": "trace-request",
+                "request_id": "req-request",
+                "task_id": "task-request",
+                "session_id": "session-request",
+                "span_id": "span-request",
+            },
+        ),
+        user_input="run something",
+        request_envelope=request_envelope,
+    )
+
+    list(workflow.execute(context))
+
+    assert provider.captured_kwargs is not None
+    assert provider.captured_kwargs["request_envelope"]["request_metadata"] == {
+        "session_id": "",
+        "trace_id": "",
+        "request_id": "",
+        "task_id": "",
+        "span_id": "",
+        "enable_thinking": True,
+        "stream": True,
+    }
+    assert provider.captured_kwargs["metadata"] == {
+        "trace_id": "trace-request",
+        "request_id": "req-request",
+        "task_id": "task-request",
+        "session_id": "session-request",
+        "span_id": "span-request",
+    }
+
+
+@pytest.mark.unit
 def test_chat_service_stream_chat_merges_structured_tool_calls() -> None:
     provider = _ToolCallStreamProvider()
     service = ChatService(provider=provider, system_prompt="You are Alice")
@@ -238,3 +364,6 @@ def test_chat_service_stream_chat_merges_structured_tool_calls() -> None:
     assert response.usage.total_tokens == 8
     assert service.messages[-1].role == "assistant"
     assert service.messages[-1].tool_calls == response.tool_calls
+
+
+__all__ = []

@@ -27,16 +27,18 @@
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use ratatui::{backend::CrosstermBackend, Terminal};
+use ratatui::{Terminal, backend::CrosstermBackend};
 
 use std::io;
 use std::time::{Duration, Instant};
 
 use alice_frontend::app::state::App;
 use alice_frontend::bridge::client::BridgeClient;
-use alice_frontend::core::dispatcher::{drain_bridge_messages, is_actionable_stderr_error, EventDispatcher};
+use alice_frontend::core::dispatcher::{
+    EventDispatcher, drain_bridge_messages, is_actionable_stderr_error,
+};
 use alice_frontend::core::event::EventBus;
 use alice_frontend::ui::render_app;
 
@@ -92,7 +94,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     })?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend).map_err(|err| {
-        runtime_log("main", "bridge.error", &format!("phase=terminal.new error={}", err));
+        runtime_log(
+            "main",
+            "bridge.error",
+            &format!("phase=terminal.new error={}", err),
+        );
         err
     })?;
     runtime_log("main", "system.start", "phase=raw_mode.init.ready");
@@ -153,11 +159,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or_else(|| Duration::from_secs(0));
 
         if event::poll(timeout).map_err(|err| {
-            runtime_log("main", "bridge.error", &format!("phase=event.poll error={}", err));
+            runtime_log(
+                "main",
+                "bridge.error",
+                &format!("phase=event.poll error={}", err),
+            );
             err
         })? {
             match event::read().map_err(|err| {
-                runtime_log("main", "bridge.error", &format!("phase=event.read error={}", err));
+                runtime_log(
+                    "main",
+                    "bridge.error",
+                    &format!("phase=event.read error={}", err),
+                );
                 err
             })? {
                 Event::Key(key) => {

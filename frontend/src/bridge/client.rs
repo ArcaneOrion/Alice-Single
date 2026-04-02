@@ -272,7 +272,11 @@ impl BridgeClient {
         match content {
             StatusContent::Ready => {
                 self.state = ClientState::Ready;
-                runtime_log("bridge.client", "system.start", "phase=backend.ready state=ready");
+                runtime_log(
+                    "bridge.client",
+                    "system.start",
+                    "phase=backend.ready state=ready",
+                );
             }
             StatusContent::Done => self.state = ClientState::Ready,
             _ => {}
@@ -281,10 +285,18 @@ impl BridgeClient {
 
     /// 终止 Python 进程
     pub fn shutdown(mut self) -> BridgeResult<()> {
-        runtime_log("bridge.client", "system.shutdown", "phase=bridge_client.shutdown.start");
+        runtime_log(
+            "bridge.client",
+            "system.shutdown",
+            "phase=bridge_client.shutdown.start",
+        );
         self.transport.kill()?;
         self.state = ClientState::Disconnected;
-        runtime_log("bridge.client", "system.shutdown", "phase=bridge_client.shutdown.done");
+        runtime_log(
+            "bridge.client",
+            "system.shutdown",
+            "phase=bridge_client.shutdown.done",
+        );
         Ok(())
     }
 

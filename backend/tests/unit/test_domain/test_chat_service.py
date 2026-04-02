@@ -39,7 +39,7 @@ class _EnvelopeLike:
 
 
 @pytest.mark.unit
-def test_chat_service_projects_envelope_like_runtime_context_into_system_message() -> None:
+def test_chat_service_projects_only_model_visible_context_into_system_message() -> None:
     service = ChatService(provider=MagicMock(), system_prompt="You are Alice")
 
     request_messages = service.build_request_messages(
@@ -48,11 +48,10 @@ def test_chat_service_projects_envelope_like_runtime_context_into_system_message
 
     assert request_messages[0].role == "system"
     assert request_messages[0].content.startswith("You are Alice")
-    assert "<runtime_context>" in request_messages[0].content
-    assert '"working": "working notes"' in request_messages[0].content
-    assert '"long_term": "long term memory"' in request_messages[0].content
-    assert '"summary": "toolkit, memory"' in request_messages[0].content
-    assert '"tool_history"' in request_messages[0].content
-    assert '"tool_name": "run_bash"' in request_messages[0].content
-    assert '"short_term"' not in request_messages[0].content
+    assert "<runtime_context>" not in request_messages[0].content
+    assert "working notes" in request_messages[0].content
+    assert "long term memory" in request_messages[0].content
+    assert "toolkit, memory" in request_messages[0].content
+    assert "run_bash" in request_messages[0].content
+    assert "short_term" not in request_messages[0].content
     assert request_messages[1] == ChatMessage.user("current question")

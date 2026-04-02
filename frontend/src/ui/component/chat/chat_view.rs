@@ -100,17 +100,10 @@ fn get_spinner(index: usize) -> &'static str {
 }
 
 /// 聊天视图状态
+#[derive(Default)]
 pub struct ChatViewState {
     /// List 状态
     pub list_state: ListState,
-}
-
-impl Default for ChatViewState {
-    fn default() -> Self {
-        Self {
-            list_state: ListState::default(),
-        }
-    }
 }
 
 /// 渲染聊天视图

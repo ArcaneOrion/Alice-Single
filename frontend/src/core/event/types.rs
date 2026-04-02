@@ -242,14 +242,13 @@ impl AreaBounds {
     /// 检测点所在的区域
     pub fn detect_area(&self, x: u16, y: u16, show_sidebar: bool) -> UiArea {
         // 检查侧边栏
-        if show_sidebar {
-            if x >= self.sidebar_area.x
-                && x < self.sidebar_area.x + self.sidebar_area.width
-                && y >= self.sidebar_area.y
-                && y < self.sidebar_area.y + self.sidebar_area.height
-            {
-                return UiArea::Sidebar;
-            }
+        if show_sidebar
+            && x >= self.sidebar_area.x
+            && x < self.sidebar_area.x + self.sidebar_area.width
+            && y >= self.sidebar_area.y
+            && y < self.sidebar_area.y + self.sidebar_area.height
+        {
+            return UiArea::Sidebar;
         }
 
         // 检查聊天区
