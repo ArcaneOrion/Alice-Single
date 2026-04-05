@@ -19,6 +19,7 @@ from backend.alice.application.dto.responses import (
     RuntimeEventResponse,
     RuntimeEventType,
     StatusResponse,
+    StructuredRuntimeOutput,
     TokensResponse,
     response_to_dict,
 )
@@ -387,6 +388,30 @@ class TestLegacyCompatibilitySerializer:
             "reason": "unsupported_canonical_event",
             "payload_keys": ["content", "tool_call_id"],
         }
+
+    def test_runtime_message_completed_with_tool_calls_does_not_project_premature_done(self):
+        """带 tool_calls 的 message_completed 只表示一轮模型消息结束，不应提前投影为 legacy done。"""
+        data = response_to_dict(
+            RuntimeEventResponse(
+                event_type=RuntimeEventType.MESSAGE_COMPLETED,
+                payload={
+                    "content": "Hello world",
+                    "reasoning": "",
+                    "usage": {"total_tokens": 8},
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "index": 0,
+                            "function": {"name": "run_bash", "arguments": '{"command": "echo hello world"}'},
+                        }
+                    ],
+                },
+                runtime_output=StructuredRuntimeOutput(status=ResponseStatusType.EXECUTING_TOOL.value),
+            )
+        )
+
+        assert data is None
 
     def test_canonical_tool_call_started_projects_to_status_message(self, caplog):
         """canonical tool_call_started 事件必须投影为 legacy status 消息"""

@@ -111,6 +111,7 @@ def test_chat_workflow_uses_merged_structured_tool_calls() -> None:
         RuntimeEventType.USAGE_UPDATED,
         RuntimeEventType.TOOL_CALL_ARGUMENT_DELTA,
         RuntimeEventType.TOOL_CALL_COMPLETED,
+        RuntimeEventType.MESSAGE_COMPLETED,
         RuntimeEventType.STATUS_CHANGED,
         RuntimeEventType.CONTENT_DELTA,
         RuntimeEventType.USAGE_UPDATED,
@@ -124,13 +125,18 @@ def test_chat_workflow_uses_merged_structured_tool_calls() -> None:
     assert runtime_responses[4].payload["delta"] == '{"command": "echo hello'
     assert runtime_responses[5].payload["usage"]["total_tokens"] == 8
     assert runtime_responses[6].payload["function"]["arguments"] == '{"command": "echo hello world"}'
-    assert runtime_responses[8].payload == {"status": StatusType.THINKING.value}
-    assert runtime_responses[9].payload == {"content": "Tool finished"}
-    assert runtime_responses[10].payload["usage"]["total_tokens"] == 6
-    assert runtime_responses[11].payload["content"] == "Tool finished"
+    assert runtime_responses[7].payload["function"]["arguments"] == '{"command": "echo hello world"}'
+    assert runtime_responses[8].payload["content"] == "Hello world"
+    assert runtime_responses[8].payload["usage"]["total_tokens"] == 8
+    assert runtime_responses[8].runtime_output is not None
+    assert runtime_responses[8].runtime_output.status == StatusType.EXECUTING_TOOL.value
+    assert runtime_responses[9].payload == {"status": StatusType.THINKING.value}
+    assert runtime_responses[10].payload == {"content": "Tool finished"}
     assert runtime_responses[11].payload["usage"]["total_tokens"] == 6
+    assert runtime_responses[12].payload["content"] == "Tool finished"
+    assert runtime_responses[12].payload["usage"]["total_tokens"] == 6
 
-    final_runtime_output = runtime_responses[11].runtime_output
+    final_runtime_output = runtime_responses[12].runtime_output
     assert final_runtime_output is not None
     assert final_runtime_output.status == StatusType.DONE.value
     assert final_runtime_output.content == "Tool finished"
@@ -154,6 +160,35 @@ def test_chat_workflow_uses_merged_structured_tool_calls() -> None:
     assert provider.captured_kwargs is not None
     assert provider.captured_kwargs["tool_choice"] == "auto"
     assert len(provider.captured_kwargs["tools"]) == 2
+
+
+@pytest.mark.unit
+def test_chat_workflow_emits_interrupt_ack_without_leading_thinking_when_already_interrupted() -> None:
+    provider = _ToolCallStreamProvider()
+    chat_service = ChatService(provider=provider, system_prompt="You are Alice")
+    workflow = ChatWorkflow(
+        chat_service=chat_service,
+        execution_service=MagicMock(),
+        function_calling_orchestrator=MagicMock(),
+    )
+
+    context = WorkflowContext(
+        request_context=RequestContext(
+            request_type=RequestType.CHAT,
+            metadata={"trace_id": "trace-1", "request_id": "req-1", "task_id": "task-1"},
+        ),
+        user_input="run something",
+        interrupted=True,
+    )
+
+    responses = list(workflow.execute(context))
+
+    assert len(responses) == 1
+    response = cast(RuntimeEventResponse, responses[0])
+    assert response.event_type == RuntimeEventType.INTERRUPT_ACK
+    assert response.payload == {}
+    assert response.runtime_output is not None
+    assert response.runtime_output.status == StatusType.INTERRUPTED.value
 
 
 @pytest.mark.unit

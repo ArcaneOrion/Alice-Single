@@ -323,18 +323,6 @@ class ChatWorkflow(Workflow):
                 legacy_event_type="iteration_start",
                 data={"max_iterations": self.max_iterations},
             )
-            yield emit_runtime_event(
-                iteration_no=iteration,
-                event_type=RuntimeEventType.STATUS_CHANGED,
-                payload={"status": StatusType.THINKING.value},
-                status=StatusType.THINKING.value,
-                content=full_content,
-                reasoning=full_thinking,
-                usage_payload=usage_payload,
-                tool_call_state=tool_call_state,
-                tool_results=runtime_tool_results,
-            )
-
             if context.interrupted:
                 log_transition(
                     phase="iteration_end",
@@ -358,6 +346,18 @@ class ChatWorkflow(Workflow):
                     tool_results=runtime_tool_results,
                 )
                 return
+
+            yield emit_runtime_event(
+                iteration_no=iteration,
+                event_type=RuntimeEventType.STATUS_CHANGED,
+                payload={"status": StatusType.THINKING.value},
+                status=StatusType.THINKING.value,
+                content=full_content,
+                reasoning=full_thinking,
+                usage_payload=usage_payload,
+                tool_call_state=tool_call_state,
+                tool_results=runtime_tool_results,
+            )
 
             try:
                 iteration_request_envelope = build_iteration_request_envelope()
@@ -528,6 +528,30 @@ class ChatWorkflow(Workflow):
                         for tool_call in payload.get("tool_calls") or []:
                             normalized_tool_call = normalize_tool_call_payload(dict(tool_call))
                             tool_call_state[normalized_tool_call.index] = normalized_tool_call
+                        yield emit_runtime_event(
+                            iteration_no=iteration,
+                            event_type=RuntimeEventType.MESSAGE_COMPLETED,
+                            payload={
+                                "content": full_content,
+                                "reasoning": full_thinking,
+                                "usage": dict(usage_payload),
+                                "tool_calls": [
+                                    tool_call.to_dict()
+                                    for tool_call in structured_tool_calls(tool_call_state)
+                                ],
+                            },
+                            status=(
+                                StatusType.EXECUTING_TOOL.value
+                                if tool_call_state
+                                else StatusType.DONE.value
+                            ),
+                            content=full_content,
+                            reasoning=full_thinking,
+                            usage_payload=usage_payload,
+                            tool_call_state=tool_call_state,
+                            tool_results=runtime_tool_results,
+                        )
+                        continue
             except Exception as e:
                 log_transition(
                     phase="iteration_end",
@@ -597,22 +621,6 @@ class ChatWorkflow(Workflow):
                         "thinking_length": len(full_thinking),
                         "timing": {"duration_ms": int((time.monotonic() - iteration_started_at) * 1000)},
                     },
-                )
-                yield emit_runtime_event(
-                    iteration_no=iteration,
-                    event_type=RuntimeEventType.MESSAGE_COMPLETED,
-                    payload={
-                        "content": full_content,
-                        "reasoning": full_thinking,
-                        "usage": dict(usage_payload),
-                        "tool_calls": list(tool_calls),
-                    },
-                    status=StatusType.DONE.value,
-                    content=full_content,
-                    reasoning=full_thinking,
-                    usage_payload=usage_payload,
-                    tool_call_state=tool_call_state,
-                    tool_results=runtime_tool_results,
                 )
                 return
 

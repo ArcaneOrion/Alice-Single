@@ -139,7 +139,12 @@ def serialize_canonical_event(event: CanonicalBridgeEvent) -> dict[str, Any] | N
     elif event.event_type == CanonicalEventType.TOOL_CALL_STARTED:
         serialized = serialize_status_message("executing_tool")
     elif event.event_type == CanonicalEventType.MESSAGE_COMPLETED:
-        serialized = serialize_status_message("done")
+        has_tool_calls = bool(payload.get("tool_calls"))
+        runtime_status = str(getattr(getattr(event, "runtime_output", None), "status", "") or "")
+        if has_tool_calls and runtime_status != "done":
+            serialized = None
+        else:
+            serialized = serialize_status_message("done")
     elif event.event_type == CanonicalEventType.ERROR_RAISED:
         serialized = serialize_error_message(
             content=str(payload.get("content") or ""),
@@ -185,6 +190,7 @@ def serialize_runtime_event_response(response: Any) -> dict[str, Any] | None:
         CanonicalBridgeEvent(
             event_type=canonical_event_type,
             payload=dict(payload),
+            runtime_output=getattr(response, "runtime_output", None),
         )
     )
 
