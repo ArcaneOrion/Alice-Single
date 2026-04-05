@@ -132,29 +132,11 @@ class ChatWorkflow(Workflow):
             else:
                 logger.info(message, extra=extra)
 
-        def normalize_tool_call_payload(payload: dict[str, Any]) -> dict[str, Any]:
-            function = payload.get("function") or {}
-            return {
-                "id": str(payload.get("id") or ""),
-                "type": str(payload.get("type") or "function"),
-                "index": int(payload.get("index") or 0),
-                "function": {
-                    "name": str(function.get("name") or ""),
-                    "arguments": str(function.get("arguments") or ""),
-                },
-            }
+        def normalize_tool_call_payload(payload: dict[str, Any]) -> StructuredToolCall:
+            return StructuredToolCall.from_dict(payload)
 
-        def structured_tool_calls(tool_call_state: dict[int, dict[str, Any]]) -> list[StructuredToolCall]:
-            return [
-                StructuredToolCall(
-                    index=int(tool_call.get("index") or 0),
-                    id=str(tool_call.get("id") or ""),
-                    type=str(tool_call.get("type") or "function"),
-                    function_name=str((tool_call.get("function") or {}).get("name") or ""),
-                    function_arguments=str((tool_call.get("function") or {}).get("arguments") or ""),
-                )
-                for _, tool_call in sorted(tool_call_state.items())
-            ]
+        def structured_tool_calls(tool_call_state: dict[int, StructuredToolCall]) -> list[StructuredToolCall]:
+            return [tool_call_state[index] for index in sorted(tool_call_state)]
 
         def build_runtime_output(
             *,
@@ -163,7 +145,7 @@ class ChatWorkflow(Workflow):
             content: str,
             reasoning: str,
             usage_payload: dict[str, Any],
-            tool_call_state: dict[int, dict[str, Any]],
+            tool_call_state: dict[int, StructuredToolCall],
             tool_results: list[StructuredToolResult],
         ) -> StructuredRuntimeOutput:
             metadata = {
@@ -194,7 +176,7 @@ class ChatWorkflow(Workflow):
             content: str,
             reasoning: str,
             usage_payload: dict[str, Any],
-            tool_call_state: dict[int, dict[str, Any]],
+            tool_call_state: dict[int, StructuredToolCall],
             tool_results: list[StructuredToolResult],
         ) -> RuntimeEventResponse:
             return RuntimeEventResponse(
@@ -330,7 +312,7 @@ class ChatWorkflow(Workflow):
             full_content = ""
             full_thinking = ""
             usage_payload: dict[str, Any] = {}
-            tool_call_state: dict[int, dict[str, Any]] = {}
+            tool_call_state: dict[int, StructuredToolCall] = {}
             runtime_tool_results: list[StructuredToolResult] = []
             runtime_event_count = 0
 
@@ -500,7 +482,7 @@ class ChatWorkflow(Workflow):
                         RuntimeEventType.TOOL_CALL_COMPLETED.value,
                     }:
                         normalized_tool_call = normalize_tool_call_payload(payload)
-                        tool_call_state[int(normalized_tool_call["index"])] = normalized_tool_call
+                        tool_call_state[normalized_tool_call.index] = normalized_tool_call
                         yield emit_runtime_event(
                             iteration_no=iteration,
                             event_type=RuntimeEventType(event_name),
@@ -545,7 +527,7 @@ class ChatWorkflow(Workflow):
                         usage_payload = dict(payload.get("usage") or usage_payload)
                         for tool_call in payload.get("tool_calls") or []:
                             normalized_tool_call = normalize_tool_call_payload(dict(tool_call))
-                            tool_call_state[int(normalized_tool_call["index"])] = normalized_tool_call
+                            tool_call_state[normalized_tool_call.index] = normalized_tool_call
             except Exception as e:
                 log_transition(
                     phase="iteration_end",
@@ -577,18 +559,7 @@ class ChatWorkflow(Workflow):
                 )
                 return
 
-            tool_calls = [
-                {
-                    "id": tool_call.id,
-                    "type": tool_call.type,
-                    "index": tool_call.index,
-                    "function": {
-                        "name": tool_call.function_name,
-                        "arguments": tool_call.function_arguments,
-                    },
-                }
-                for tool_call in structured_tool_calls(tool_call_state)
-            ]
+            tool_calls = [tool_call.to_dict() for tool_call in structured_tool_calls(tool_call_state)]
             tool_names = sorted(
                 {
                     str((tool_call.get("function") or {}).get("name") or "")
@@ -720,7 +691,7 @@ class ChatWorkflow(Workflow):
             for execution_result in orchestration_result.execution_results:
                 tool_result_payload = {
                     "tool_call_id": execution_result.invocation.id or f"tool-call-{execution_result.invocation.index}",
-                    "tool_type": execution_result.invocation.type,
+                    "type": execution_result.invocation.type,
                     "content": execution_result.tool_message_content(),
                     "status": execution_result.payload.status,
                     "metadata": dict(execution_result.payload.metadata or {}),
@@ -728,7 +699,7 @@ class ChatWorkflow(Workflow):
                 runtime_tool_results.append(
                     StructuredToolResult(
                         tool_call_id=str(tool_result_payload["tool_call_id"]),
-                        tool_type=str(tool_result_payload["tool_type"]),
+                        tool_type=str(tool_result_payload["type"]),
                         content=str(tool_result_payload["content"]),
                         status=str(tool_result_payload["status"]),
                         metadata=dict(tool_result_payload["metadata"]),

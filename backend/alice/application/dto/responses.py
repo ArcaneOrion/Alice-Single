@@ -8,10 +8,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from backend.alice.infrastructure.bridge.legacy_compatibility_serializer import (
-    serialize_application_response,
-)
-
 
 class ResponseType(str, Enum):
     """响应类型枚举"""
@@ -56,27 +52,44 @@ class RuntimeEventType(str, Enum):
 
 @dataclass(frozen=True)
 class StructuredToolCall:
-    """结构化工具调用"""
+    """结构化工具调用。"""
 
     index: int = 0
     id: str = ""
-    type: str = ""
+    type: str = "function"
     function_name: str = ""
     function_arguments: str = ""
+
+    @property
+    def function(self) -> dict[str, str]:
+        return {
+            "name": self.function_name,
+            "arguments": self.function_arguments,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "StructuredToolCall":
+        function = payload.get("function") or {}
+        return cls(
+            index=int(payload.get("index") or 0),
+            id=str(payload.get("id") or ""),
+            type=str(payload.get("type") or "function"),
+            function_name=str(function.get("name") or payload.get("function_name") or ""),
+            function_arguments=str(function.get("arguments") or payload.get("function_arguments") or ""),
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "index": self.index,
             "id": self.id,
             "type": self.type,
-            "function_name": self.function_name,
-            "function_arguments": self.function_arguments,
+            "function": dict(self.function),
         }
 
 
 @dataclass(frozen=True)
 class StructuredToolResult:
-    """结构化工具结果"""
+    """结构化工具结果。"""
 
     tool_call_id: str = ""
     tool_type: str = ""
@@ -84,10 +97,24 @@ class StructuredToolResult:
     status: str = "success"
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def type(self) -> str:
+        return self.tool_type
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "StructuredToolResult":
+        return cls(
+            tool_call_id=str(payload.get("tool_call_id") or ""),
+            tool_type=str(payload.get("type") or payload.get("tool_type") or ""),
+            content=str(payload.get("content") or ""),
+            status=str(payload.get("status") or "success"),
+            metadata=dict(payload.get("metadata") or {}),
+        )
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "tool_call_id": self.tool_call_id,
-            "tool_type": self.tool_type,
+            "type": self.tool_type,
             "content": self.content,
             "status": self.status,
             "metadata": dict(self.metadata),
@@ -280,6 +307,10 @@ class AgentStatus:
 
 def application_response_to_legacy_dict(response: ApplicationResponse) -> dict[str, Any] | None:
     """统一通过 compatibility serializer 投影到 legacy bridge 输出。"""
+    from backend.alice.infrastructure.bridge.legacy_compatibility_serializer import (
+        serialize_application_response,
+    )
+
     return serialize_application_response(response)
 
 

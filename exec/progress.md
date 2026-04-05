@@ -1,0 +1,50 @@
+## Wave 1 - Agent Gamma - Phase 3
+- 状态：完成
+- 日期：2026-04-05
+- 改动文件列表
+  - `backend/alice/application/services/lifecycle_service.py`
+  - `backend/alice/domain/execution/executors/base.py`
+  - `backend/alice/domain/execution/executors/docker_executor.py`
+  - `backend/alice/domain/execution/executors/__init__.py`
+  - `backend/alice/infrastructure/docker/container_manager.py`
+  - `backend/alice/infrastructure/docker/__init__.py`
+- 测试结果摘要
+  - 通过：`python -m pytest backend/tests/unit/test_domain/test_runtime_context_phase2.py -v`
+  - 通过：`python -m pytest backend/tests/integration/test_agent.py -k "execute_tool_invocation_alias" -v`
+  - 通过：`python -m pytest backend/tests/unit/test_domain/test_docker_executor.py -v`
+  - 通过：`python -m pytest backend/tests/integration/test_logging_e2e.py -k "workflow_executor_and_api_error_events" -v`
+  - 全量执行：`python -m pytest backend/tests/ -v`
+    - 结果：失败（基线/外部改动导致的收集期错误）
+    - 错误：`backend/tests/unit/test_core/test_container.py` 导入 `backend.alice.core.container.ServiceDescriptor` 失败
+  - 手动验证：`docker ps -a --filter name=alice-sandbox-instance`
+    - 结果：`alice-sandbox-instance` 容器存在且处于 `Up` 状态
+- 对外接口变更说明（如有）
+  - 无破坏性接口变更
+  - `LifecycleService` 与 `DockerExecutor` 仍保持原有构造入口可用
+  - 新增统一 seam 导出：`ExecutionBackend`、`ExecutionBackendStatus`、`DockerExecutionBackend`
+- 遗留问题（如有）
+  - 全量后端测试当前被 `backend.alice.core.container` 的导出缺失阻塞，问题位于本 Phase 允许修改范围之外
+  - `backend/tests/unit/test_domain/test_command.py::TestCommandParsing::test_case_sensitivity_in_builtin_detection` 当前与现实现状不一致，未在本 Phase 修改
+
+## Wave 1 - Agent Alpha - Phase 1
+- 状态：完成
+- 日期：2026-04-05
+- 改动文件列表
+  - `backend/alice/application/dto/responses.py`
+  - `backend/alice/application/workflow/chat_workflow.py`
+  - `backend/alice/infrastructure/bridge/canonical_bridge.py`
+- 测试结果摘要
+  - 通过：`python -m pytest backend/tests/unit/test_domain/test_chat_workflow.py -q`
+  - 通过：`python -m pytest backend/tests/integration/test_bridge.py -q`
+  - 通过：`python -m pytest backend/tests/integration/test_logging_e2e.py::test_logging_e2e_tracks_legacy_compatibility_projection_events -q`
+  - 通过：`python -m pytest backend/tests/integration/test_logging_e2e.py::test_logging_e2e_tracks_typed_tool_call_aggregation -q`
+  - 通过：`python -m pytest backend/tests/unit/test_domain/test_stream_service.py -q`
+  - 全量执行：`python -m pytest backend/tests -v`
+    - 结果：失败（基线/外部改动导致的收集期错误）
+    - 错误：`backend/tests/unit/test_core/test_container.py` 导入 `backend.alice.core.container.ServiceDescriptor` 失败
+- 对外接口变更说明（如有）
+  - 无破坏性接口变更
+  - canonical bridge 模型改为复用 dto 层定义，避免 bridge 与 dto 双份漂移
+  - workflow 发出的 tool call / tool result 载荷统一对齐 dto canonical envelope
+- 遗留问题（如有）
+  - 全量后端测试当前被 `backend.alice.core.container` 的导出缺失阻塞，问题位于本 Phase 允许修改范围之外
