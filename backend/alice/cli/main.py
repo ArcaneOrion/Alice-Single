@@ -20,6 +20,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
+
 def _prepare_process_environment() -> None:
     """仅在 CLI 真实运行时准备工作目录与 stdout。"""
     os.chdir(project_root)
@@ -27,14 +28,15 @@ def _prepare_process_environment() -> None:
     if buffer is not None:
         sys.stdout = io.TextIOWrapper(buffer, encoding="utf-8", line_buffering=True)
 
+
 from backend.alice.application.agent import AliceAgent
 from backend.alice.application.services import OrchestrationService, LifecycleService
 from backend.alice.application.workflow import WorkflowChain, ChatWorkflow
 from backend.alice.application.dto import response_to_dict
 from backend.alice.core.config.loader import load_config
 from backend.alice.core.logging import configure_logging
+from backend.alice.core.registry import get_llm_registry
 from backend.alice.domain.llm.providers.base import ProviderCapability
-from backend.alice.domain.llm.providers.openai_provider import resolve_request_header_profiles
 from backend.alice.infrastructure.bridge.legacy_compatibility_serializer import (
     serialize_error_message,
     serialize_status_message,
@@ -73,16 +75,14 @@ class TUIBridge:
     """
 
     def __init__(self):
-        """初始化桥接器"""
         self.agent: AliceAgent | None = None
         self.input_queue = queue.Queue()
         self._running = False
-
-        # 初始化异步输入监听
         self._start_stdin_reader()
 
     def _start_stdin_reader(self):
         """启动 stdin 监听线程"""
+
         def stdin_reader():
             while True:
                 try:
@@ -98,13 +98,8 @@ class TUIBridge:
         threading.Thread(target=stdin_reader, daemon=True).start()
 
     def initialize(self) -> bool:
-        """初始化 Agent
-
-        Returns:
-            是否初始化成功
-        """
+        """初始化 Agent"""
         try:
-            # 加载配置
             from dotenv import load_dotenv
 
             load_dotenv()
@@ -115,13 +110,15 @@ class TUIBridge:
             api_key = os.getenv("API_KEY", "")
             base_url = os.getenv("API_BASE_URL", "https://api-inference.modelscope.cn/v1/")
             model_name = os.getenv("MODEL_NAME", "")
+            provider_name = os.getenv("PROVIDER_NAME", "openai")
+            skill_source_name = os.getenv("SKILL_SOURCE_NAME", "default")
+            harness_name = os.getenv("HARNESS_NAME", "docker")
 
             if not api_key:
                 raise ValueError("API_KEY 环境变量未设置")
             if not model_name:
                 raise ValueError("MODEL_NAME 环境变量未设置")
 
-            # 解析请求头配置
             request_header_profiles = []
             profiles_str = os.getenv("REQUEST_HEADER_PROFILES", "")
             if profiles_str:
@@ -129,17 +126,16 @@ class TUIBridge:
                     request_header_profiles = _parse_request_header_profiles(profiles_str)
                 except Exception:
                     logger.warning("解析 REQUEST_HEADER_PROFILES 失败")
-            request_header_profiles = resolve_request_header_profiles(
+            request_header_profiles = get_llm_registry().resolve_request_header_profiles(
+                provider_name,
                 base_url,
                 request_header_profiles,
             )
 
-            # 解析 provider capability 覆盖
             capabilities = None
             if os.getenv("PROVIDER_SUPPORTS_TOOL_CALLING", "").lower() in ("false", "0", "no"):
                 capabilities = ProviderCapability(supports_tool_calling=False)
 
-            # 创建编排服务
             orchestration = OrchestrationService.create_from_config(
                 api_key=api_key,
                 base_url=base_url,
@@ -148,12 +144,16 @@ class TUIBridge:
                 extra_headers={},
                 request_header_profiles=request_header_profiles,
                 capabilities=capabilities,
+                provider_name=provider_name,
+                skill_source_name=skill_source_name,
+                harness_name=harness_name,
             )
 
-            # 创建生命周期服务
-            lifecycle = LifecycleService(project_root=project_root)
+            lifecycle = LifecycleService(
+                project_root=project_root,
+                backend=(orchestration.harness_bundle.backend if orchestration.harness_bundle else None),
+            )
 
-            # 创建工作流链
             workflow_chain = WorkflowChain()
             workflow_chain.add_workflow(
                 ChatWorkflow(
@@ -164,7 +164,6 @@ class TUIBridge:
                 )
             )
 
-            # 创建 Agent
             self.agent = AliceAgent(
                 orchestration_service=orchestration,
                 lifecycle_service=lifecycle,
@@ -187,15 +186,11 @@ class TUIBridge:
             return
 
         self._running = True
-
-        # 发送就绪信号
         self._send_status("ready")
-
         logger.info("TUI Bridge 进程启动，开始主循环")
 
         while self._running:
             try:
-                # 从异步队列获取输入
                 user_input = self.input_queue.get()
 
                 if user_input is None:
@@ -206,8 +201,6 @@ class TUIBridge:
                     continue
 
                 logger.info(f"收到 TUI 输入: {user_input[:100]}...")
-
-                # 通过 callback wrapper 分发请求，保持与 legacy bridge 一致的异常边界
                 self._on_message_received(user_input)
 
             except KeyboardInterrupt:
@@ -219,7 +212,6 @@ class TUIBridge:
                 self._send_error(f"Runtime Error: {str(e)}. 请查看日志输出。")
                 break
 
-        # 清理
         if self.agent:
             self.agent.shutdown()
 
@@ -234,18 +226,13 @@ class TUIBridge:
             self._send_error(f"Error: {str(e)}")
 
     def _process_user_input(self, user_input: str):
-        """处理用户输入
-
-        Args:
-            user_input: 用户输入内容
-        """
+        """处理用户输入"""
         if self.agent is None:
             self._send_error("Agent not initialized")
             return
 
         agent = self.agent
 
-        # 检查中断信号
         interrupted = False
         while not self.input_queue.empty():
             msg = self.input_queue.get_nowait()
@@ -259,10 +246,8 @@ class TUIBridge:
             self._send_status("done")
             return
 
-        # 创建请求并处理
         try:
             for response in agent.chat(user_input):
-                # 检查中断
                 while not self.input_queue.empty():
                     msg = self.input_queue.get_nowait()
                     if msg == INTERRUPT_SIGNAL:
@@ -270,7 +255,6 @@ class TUIBridge:
                         self._send_status("done")
                         return
 
-                # 发送响应
                 self._send_response(response)
 
         except Exception as e:
@@ -278,11 +262,7 @@ class TUIBridge:
             self._send_error(f"Processing error: {str(e)}")
 
     def _send_response(self, response):
-        """发送响应到 TUI
-
-        Args:
-            response: 应用响应
-        """
+        """发送响应到 TUI"""
         try:
             data = response_to_dict(response)
             if data is None:
@@ -292,23 +272,14 @@ class TUIBridge:
             logger.error(f"发送响应失败: {e}")
 
     def _send_status(self, status: str):
-        """发送状态消息
-
-        Args:
-            status: 状态字符串
-        """
+        """发送状态消息"""
         try:
             _print_legacy_message(serialize_status_message(status))
         except Exception as e:
             logger.error(f"发送状态失败: {e}")
 
     def _send_error(self, content: str, code: str = ""):
-        """发送错误消息
-
-        Args:
-            content: 错误内容
-            code: 错误代码
-        """
+        """发送错误消息"""
         try:
             _print_legacy_message(serialize_error_message(content=content, code=code))
         except Exception as e:

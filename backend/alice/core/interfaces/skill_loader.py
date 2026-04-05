@@ -1,11 +1,13 @@
+from __future__ import annotations
+
 """
 Skill Loader Protocol
 
-定义技能加载器的接口规范
+定义技能加载器与技能来源工厂的接口规范。
 """
 
-from typing import Protocol
-from dataclasses import dataclass
+from typing import Protocol, runtime_checkable, Any
+from dataclasses import dataclass, field
 from abc import abstractmethod
 from pathlib import Path
 
@@ -17,14 +19,8 @@ class SkillMetadata:
     description: str
     version: str = "1.0.0"
     license: str = ""
-    allowed_tools: list[str] = None
-    metadata: dict = None
-
-    def __post_init__(self):
-        if self.allowed_tools is None:
-            self.allowed_tools = []
-        if self.metadata is None:
-            self.metadata = {}
+    allowed_tools: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -63,3 +59,21 @@ class SkillLoader(Protocol):
     def list_skills(self) -> list[str]:
         """列出所有技能名称"""
         ...
+
+
+@runtime_checkable
+class SkillSourceFactory(Protocol):
+    """技能来源工厂，用于在 composition root 构建运行时 SkillRegistry。"""
+
+    @abstractmethod
+    def __call__(self, *, project_root: Path | None = None, **kwargs: Any) -> Any:
+        """构建技能来源。"""
+        ...
+
+
+__all__ = [
+    "SkillMetadata",
+    "Skill",
+    "SkillLoader",
+    "SkillSourceFactory",
+]

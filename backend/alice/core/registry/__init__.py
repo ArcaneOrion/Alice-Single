@@ -6,12 +6,14 @@
 
 from .command_registry import (
     CommandSpec,
+    HarnessSpec,
     CommandRegistry,
     InMemoryCommandRegistry,
     get_command_registry,
 )
 from .skill_registry import (
     SkillSpec,
+    SkillSourceSpec,
     SkillRegistry,
     InMemorySkillRegistry,
     get_skill_registry,
@@ -23,6 +25,7 @@ from .memory_registry import (
     get_memory_registry,
 )
 from .llm_registry import (
+    ProviderCreateOptions,
     LLMProviderSpec,
     ModelConfig,
     LLMRegistry,
@@ -33,11 +36,13 @@ from .llm_registry import (
 __all__ = [
     # 命令注册表
     "CommandSpec",
+    "HarnessSpec",
     "CommandRegistry",
     "InMemoryCommandRegistry",
     "get_command_registry",
     # 技能注册表
     "SkillSpec",
+    "SkillSourceSpec",
     "SkillRegistry",
     "InMemorySkillRegistry",
     "get_skill_registry",
@@ -47,6 +52,7 @@ __all__ = [
     "InMemoryMemoryRegistry",
     "get_memory_registry",
     # LLM 注册表
+    "ProviderCreateOptions",
     "LLMProviderSpec",
     "ModelConfig",
     "LLMRegistry",

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from ..models import (
     ToolArgumentValidationError,
     ToolCategory,
@@ -16,10 +18,21 @@ from ...skills.services.skill_registry import SkillRegistry
 class ToolRegistry:
     """统一维护四分类工具快照，并继续暴露最小 function calling schema。"""
 
-    def __init__(self, skill_registry: SkillRegistry | None = None) -> None:
+    def __init__(
+        self,
+        skill_registry: SkillRegistry | None = None,
+        tool_schemas: Iterable[ToolSchemaDefinition] | None = None,
+    ) -> None:
         self.skill_registry = skill_registry
         self._tools = {
-            "run_bash": ToolSchemaDefinition(
+            tool.name: tool
+            for tool in (tool_schemas or self._default_tool_schemas())
+        }
+
+    @staticmethod
+    def _default_tool_schemas() -> list[ToolSchemaDefinition]:
+        return [
+            ToolSchemaDefinition(
                 name="run_bash",
                 description="在受控执行环境中运行 bash 命令。",
                 parameters={
@@ -36,7 +49,7 @@ class ToolRegistry:
                 category=ToolCategory.TERMINAL_COMMANDS,
                 metadata={"execution_environment": "docker"},
             ),
-            "run_python": ToolSchemaDefinition(
+            ToolSchemaDefinition(
                 name="run_python",
                 description="在受控执行环境中运行 Python 代码。",
                 parameters={
@@ -53,10 +66,16 @@ class ToolRegistry:
                 category=ToolCategory.CODE_EXECUTION,
                 metadata={"execution_environment": "docker"},
             ),
-        }
+        ]
 
     def set_skill_registry(self, skill_registry: SkillRegistry | None) -> None:
         self.skill_registry = skill_registry
+
+    def register_tool(self, tool: ToolSchemaDefinition) -> None:
+        self._tools[tool.name] = tool
+
+    def unregister_tool(self, name: str) -> None:
+        self._tools.pop(name, None)
 
     def list_tools(self) -> list[ToolSchemaDefinition]:
         return list(self._tools.values())
