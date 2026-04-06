@@ -75,6 +75,8 @@ def test_build_tool_kwargs_preserves_request_envelope() -> None:
         "metadata": {"request_id": "req-1"},
         "request_envelope": {"request_metadata": {"trace_id": "trace-1", "span_id": "span-1"}},
     }
+    assert "tools" not in kwargs
+    assert "tool_choice" not in kwargs
 
 
 @pytest.mark.unit
@@ -164,3 +166,34 @@ def test_build_tool_kwargs_logs_binding_rejection_for_capability_mismatch(caplog
         "decision": "rejected",
         "reason": "provider_does_not_support_tool_calling",
     }
+
+
+@pytest.mark.unit
+def test_build_tool_kwargs_treats_metadata_and_request_envelope_as_separate_layers() -> None:
+    provider = _RuntimeStreamProvider()
+
+    kwargs = build_tool_kwargs(
+        provider,
+        [{"type": "function", "function": {"name": "run_bash"}}],
+        metadata={"request_id": "req-1", "trace_id": "trace-1"},
+        request_envelope={"request_metadata": {"trace_id": "trace-1"}},
+    )
+
+    assert kwargs == {
+        "metadata": {"request_id": "req-1", "trace_id": "trace-1"},
+        "request_envelope": {"request_metadata": {"trace_id": "trace-1"}},
+        "tools": [{"type": "function", "function": {"name": "run_bash"}}],
+        "tool_choice": "auto",
+    }
+    assert "request_metadata" not in kwargs["metadata"]
+    assert "metadata" not in kwargs["request_envelope"]
+    assert build_tool_kwargs(provider, [], metadata={"trace_id": "trace-2"}) == {
+        "metadata": {"trace_id": "trace-2"}
+    }
+    assert build_tool_kwargs(provider, [], request_envelope={"request_metadata": {"trace_id": "trace-3"}}) == {
+        "request_envelope": {"request_metadata": {"trace_id": "trace-3"}}
+    }
+    assert build_tool_kwargs(provider, []) == {}
+
+
+__all__ = []

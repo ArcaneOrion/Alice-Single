@@ -5,7 +5,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from backend.alice.application.runtime import RuntimeContextBuilder, TimeProvider
+from backend.alice.application.runtime import (
+    RequestEnvelope,
+    RequestMetadata,
+    RuntimeContextBuilder,
+    TimeProvider,
+)
 from backend.alice.application.workflow.function_calling_orchestrator import FunctionCallingOrchestrator
 from backend.alice.domain.execution.models.execution_result import ExecutionResult
 from backend.alice.domain.execution.models.tool_calling import (
@@ -96,6 +101,57 @@ def test_runtime_context_builder_splits_history_and_current_question() -> None:
     assert envelope_payload["messages"][-1]["content"] == "current question"
     assert envelope_payload["model_context"]["memory_snapshot"]["working"] == "working"
     assert envelope_payload["request_metadata"]["span_id"] == "span1"
+
+    next_envelope = request_envelope.with_messages(
+        [
+            {"role": "user", "content": "old question"},
+            {"role": "assistant", "content": "old answer"},
+            {"role": "assistant", "content": "tool done"},
+        ]
+    )
+    next_payload = next_envelope.to_dict()
+    assert next_payload["messages"] == [
+        {"role": "user", "content": "old question"},
+        {"role": "assistant", "content": "old answer"},
+        {"role": "assistant", "content": "tool done"},
+    ]
+    assert next_payload["system"] == envelope_payload["system"]
+    assert next_payload["model_context"] == envelope_payload["model_context"]
+    assert next_payload["tools"] == envelope_payload["tools"]
+    assert next_payload["request_metadata"] == envelope_payload["request_metadata"]
+    assert next_payload["tool_history"] == envelope_payload["tool_history"]
+    assert request_envelope.messages[-1]["content"] == "current question"
+    assert next_envelope is not request_envelope
+
+
+@pytest.mark.unit
+def test_request_envelope_with_messages_keeps_phase2_fields_stable() -> None:
+    envelope = RequestEnvelope(
+        system_prompt="You are Alice",
+        messages=[{"role": "user", "content": "first"}],
+        model_context={"memory_snapshot": {"working": "notes"}},
+        tools={"builtin_system_tools": [{"tool_id": "run_bash"}]},
+        request_metadata=RequestMetadata(trace_id="trace-1", request_id="req-1", task_id="task-1"),
+        tool_history=[{"tool_name": "run_bash", "status": "success"}],
+    )
+
+    updated = envelope.with_messages(
+        [
+            {"role": "user", "content": "first"},
+            {"role": "assistant", "content": "second"},
+        ]
+    )
+
+    assert updated.messages == [
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "second"},
+    ]
+    assert updated.system_prompt == envelope.system_prompt
+    assert updated.model_context == envelope.model_context
+    assert updated.tools == envelope.tools
+    assert updated.request_metadata == envelope.request_metadata
+    assert updated.tool_history == envelope.tool_history
+    assert envelope.messages == [{"role": "user", "content": "first"}]
 
 
 @pytest.mark.unit

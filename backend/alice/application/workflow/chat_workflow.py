@@ -25,7 +25,6 @@ from backend.alice.domain.execution.services.tool_registry import ToolRegistry
 from backend.alice.domain.llm.services.stream_service import (
     StreamService,
     build_tool_kwargs,
-    supports_structured_tool_calling,
 )
 
 logger = logging.getLogger(__name__)
@@ -224,24 +223,6 @@ class ChatWorkflow(Workflow):
         self.chat_service.add_user_message(context.user_input)
         tools = self.tool_registry.list_openai_tools()
 
-        if tools and not supports_structured_tool_calling(self.chat_service.provider):
-            model_name = getattr(self.chat_service.provider, "model_name", "") or ""
-            yield emit_runtime_event(
-                iteration_no=0,
-                event_type=RuntimeEventType.ERROR_RAISED,
-                payload={
-                    "content": f"当前模型不支持结构化 tool calling: {model_name}",
-                    "code": "TOOL_CALLING_UNSUPPORTED",
-                },
-                status=StatusType.ERROR.value,
-                content="",
-                reasoning="",
-                usage_payload={},
-                tool_call_state={},
-                tool_results=[],
-            )
-            return
-
         request_metadata = context.request_context.metadata if isinstance(context.request_context.metadata, dict) else {}
         active_runtime_context = getattr(context, "runtime_context", None)
         active_request_envelope = getattr(context, "request_envelope", None)
@@ -280,20 +261,14 @@ class ChatWorkflow(Workflow):
             }
 
         def build_iteration_request_envelope() -> RequestEnvelope | None:
+            iteration_messages = [message.to_dict() for message in chat_service.messages if message.role != "system"]
             if active_request_envelope is not None:
-                return RequestEnvelope(
-                    system_prompt=active_request_envelope.system_prompt,
-                    messages=[message.to_dict() for message in chat_service.messages if message.role != "system"],
-                    model_context=dict(active_request_envelope.model_context),
-                    tools={category: list(items) for category, items in active_request_envelope.tools.items()},
-                    request_metadata=active_request_envelope.request_metadata,
-                    tool_history=list(active_request_envelope.tool_history),
-                )
+                return active_request_envelope.with_messages(iteration_messages)
             if active_runtime_context is None:
                 return None
             return RequestEnvelope(
                 system_prompt=active_runtime_context.system_prompt,
-                messages=[message.to_dict() for message in chat_service.messages if message.role != "system"],
+                messages=iteration_messages,
                 model_context={
                     "local_time": active_runtime_context.local_time.to_dict() if active_runtime_context.local_time else {},
                     "memory_snapshot": active_runtime_context.memory_snapshot.to_dict(),

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 
@@ -175,6 +175,9 @@ class RequestEnvelope:
     tools: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     request_metadata: RequestMetadata = field(default_factory=RequestMetadata)
     tool_history: list[dict[str, Any]] = field(default_factory=list)
+
+    def with_messages(self, messages: list[dict[str, Any]]) -> "RequestEnvelope":
+        return replace(self, messages=list(messages))
 
     def to_dict(self) -> dict[str, Any]:
         return {

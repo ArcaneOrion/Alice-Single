@@ -387,7 +387,7 @@ class OpenAIProvider(BaseLLMProvider):
         transport_kwargs = {
             key: value
             for key, value in kwargs.items()
-            if key not in {"request_envelope"}
+            if key not in {"metadata", "request_envelope"}
         }
 
         # 合并额外参数

@@ -12,7 +12,7 @@ from backend.alice.domain.execution.models.execution_result import ExecutionResu
 from backend.alice.domain.execution.models.tool_calling import ToolExecutionResult, ToolInvocation, ToolResultPayload
 from backend.alice.domain.llm.models.message import ChatMessage
 from backend.alice.domain.llm.models.stream_chunk import StreamChunk, TokenUsageUpdate, ToolCallDelta
-from backend.alice.domain.llm.providers.base import BaseLLMProvider
+from backend.alice.domain.llm.providers.base import BaseLLMProvider, ProviderCapability
 from backend.alice.domain.llm.services.chat_service import ChatService
 
 
@@ -21,6 +21,7 @@ class _ToolCallStreamProvider(BaseLLMProvider):
         super().__init__("gpt-4o-mini")
         self.captured_messages = None
         self.captured_kwargs = None
+        self.request_history = []
         self._stream_calls = 0
         self._first_chunks = [
             StreamChunk(content="Hello "),
@@ -64,6 +65,12 @@ class _ToolCallStreamProvider(BaseLLMProvider):
     def stream_chat(self, messages, **kwargs):
         self.captured_messages = list(messages)
         self.captured_kwargs = dict(kwargs)
+        self.request_history.append(
+            {
+                "messages": [message.to_dict() if hasattr(message, "to_dict") else message for message in messages],
+                "kwargs": dict(kwargs),
+            }
+        )
         self._stream_calls += 1
         chunks = self._first_chunks if self._stream_calls == 1 else self._second_chunks
         yield from chunks
@@ -372,6 +379,135 @@ def test_chat_workflow_falls_back_to_request_context_metadata_when_request_envel
         "session_id": "session-request",
         "span_id": "span-request",
     }
+
+
+@pytest.mark.unit
+def test_chat_workflow_refreshes_request_envelope_messages_on_every_round() -> None:
+    provider = _ToolCallStreamProvider()
+    chat_service = ChatService(provider=provider, system_prompt="You are Alice")
+    orchestrator = MagicMock()
+    orchestration_result = MagicMock()
+    orchestration_result.assistant_message = ChatMessage.assistant(
+        "Hello world",
+        tool_calls=[
+            {
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                    "name": "run_bash",
+                    "arguments": '{"command": "echo hello world"}',
+                },
+            }
+        ],
+    )
+    orchestration_result.tool_messages = [
+        ChatMessage.tool('{"tool_name": "run_bash", "success": true}', tool_call_id="call_1")
+    ]
+    orchestration_result.execution_results = []
+    orchestrator.execute_tool_calls.return_value = orchestration_result
+
+    workflow = ChatWorkflow(
+        chat_service=chat_service,
+        execution_service=MagicMock(),
+        function_calling_orchestrator=orchestrator,
+    )
+
+    request_envelope = RequestEnvelope(
+        system_prompt="Envelope system",
+        messages=[{"role": "user", "content": "seed history"}, {"role": "user", "content": "run something"}],
+        model_context={"memory_snapshot": {"working": "notes"}},
+        tools={"builtin_system_tools": [{"tool_id": "run_bash"}]},
+        request_metadata=RequestMetadata(trace_id="trace-envelope", request_id="req-envelope", task_id="task-envelope"),
+        tool_history=[{"tool_name": "run_bash", "status": "cached"}],
+    )
+    context = WorkflowContext(
+        request_context=RequestContext(
+            request_type=RequestType.CHAT,
+            metadata={"trace_id": "trace-request", "request_id": "req-request", "task_id": "task-request"},
+        ),
+        user_input="run something",
+        request_envelope=request_envelope,
+    )
+
+    list(workflow.execute(context))
+
+    assert len(provider.request_history) == 2
+
+    first_request = provider.request_history[0]
+    second_request = provider.request_history[1]
+
+    first_envelope = first_request["kwargs"]["request_envelope"]
+    assert first_envelope["system"] == request_envelope.to_dict()["system"]
+    assert first_envelope["model_context"] == request_envelope.to_dict()["model_context"]
+    assert first_envelope["tools"] == request_envelope.to_dict()["tools"]
+    assert first_envelope["request_metadata"] == request_envelope.to_dict()["request_metadata"]
+    assert first_envelope["tool_history"] == request_envelope.to_dict()["tool_history"]
+    assert first_envelope["messages"] == [{"role": "user", "content": "run something"}]
+    assert first_request["messages"][0]["role"] == "system"
+    assert first_request["messages"][0]["content"].startswith("Envelope system")
+    assert first_request["messages"][1:] == first_envelope["messages"]
+
+    second_envelope = second_request["kwargs"]["request_envelope"]
+    assert second_envelope["system"] == request_envelope.to_dict()["system"]
+    assert second_envelope["model_context"] == request_envelope.to_dict()["model_context"]
+    assert second_envelope["tools"] == request_envelope.to_dict()["tools"]
+    assert second_envelope["request_metadata"] == request_envelope.to_dict()["request_metadata"]
+    assert second_envelope["tool_history"] == request_envelope.to_dict()["tool_history"]
+    assert second_envelope["messages"] == [
+        {"role": "user", "content": "run something"},
+        {
+            "role": "assistant",
+            "content": "Hello world",
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {
+                        "name": "run_bash",
+                        "arguments": '{"command": "echo hello world"}',
+                    },
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "content": '{"tool_name": "run_bash", "success": true}',
+            "tool_call_id": "call_1",
+        },
+    ]
+    assert second_request["messages"][0]["role"] == "system"
+    assert second_request["messages"][0]["content"].startswith("Envelope system")
+    assert second_request["messages"][1:] == second_envelope["messages"]
+
+
+@pytest.mark.unit
+def test_chat_workflow_surfaces_capability_mismatch_from_build_tool_kwargs() -> None:
+    provider = _ToolCallStreamProvider()
+    provider._capabilities = ProviderCapability(supports_tool_calling=False)
+    chat_service = ChatService(provider=provider, system_prompt="You are Alice")
+    workflow = ChatWorkflow(
+        chat_service=chat_service,
+        execution_service=MagicMock(),
+        function_calling_orchestrator=MagicMock(),
+    )
+
+    context = WorkflowContext(
+        request_context=RequestContext(
+            request_type=RequestType.CHAT,
+            metadata={"trace_id": "trace-1", "request_id": "req-1", "task_id": "task-1"},
+        ),
+        user_input="run something",
+    )
+
+    responses = list(workflow.execute(context))
+
+    error_events = [
+        response for response in responses
+        if isinstance(response, RuntimeEventResponse) and response.event_type == RuntimeEventType.ERROR_RAISED
+    ]
+    assert len(error_events) == 1
+    assert error_events[0].payload["code"] == "CHAT_ERROR"
+    assert "当前模型不支持结构化 tool calling" in error_events[0].payload["content"]
 
 
 @pytest.mark.unit

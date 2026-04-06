@@ -769,6 +769,7 @@ def test_logging_e2e_tracks_openai_api_request_observability(tmp_path: Path) -> 
     assert api_request["data"]["request_params"]["temperature"] == 0.2
     assert api_request["data"]["request_params"]["stream"] is False
     assert api_request["data"]["request_params"]["model"] == "gpt-4o-mini"
+    assert "metadata" not in api_request["data"]["request_params"]
     assert "request_envelope" not in api_request["data"]["request_params"]
     assert api_request["data"]["message_count"] == 2
     assert api_request["data"]["role_distribution"] == {"system": 1, "user": 1}

@@ -1,5 +1,7 @@
 """Provider Capability 单元测试"""
 
+from types import SimpleNamespace
+
 import pytest
 
 # 先导入 application 层避免循环导入
@@ -73,6 +75,20 @@ class TestCapabilityGating:
         result = build_tool_kwargs(provider, tools=[])
         assert result == {}
 
+    def test_build_tool_kwargs_no_tools_preserves_observability_kwargs(self):
+        cap = ProviderCapability(supports_tool_calling=False)
+        provider = _StubProvider("no-tools-model", capabilities=cap)
+        result = build_tool_kwargs(
+            provider,
+            tools=[],
+            metadata={"trace_id": "trace-1"},
+            request_envelope={"request_metadata": {"request_id": "req-1"}},
+        )
+        assert result == {
+            "metadata": {"trace_id": "trace-1"},
+            "request_envelope": {"request_metadata": {"request_id": "req-1"}},
+        }
+
     def test_build_tool_kwargs_with_tools_unsupported_raises(self):
         """有工具但不支持 tool calling 时应报错。"""
         cap = ProviderCapability(supports_tool_calling=False)
@@ -89,3 +105,60 @@ class TestCapabilityGating:
         )
         assert result["tools"] == [{"type": "function", "function": {"name": "test"}}]
         assert result["tool_choice"] == "auto"
+
+
+class TestTransportMetadataBoundary:
+    def test_openai_provider_filters_metadata_and_request_envelope_before_sdk_call(self, monkeypatch):
+        from backend.alice.domain.llm.providers.openai_provider import OpenAIConfig, OpenAIProvider
+
+        captured_params = {}
+
+        class _FakeRawResponse:
+            status_code = 200
+            headers = {}
+            retries_taken = 0
+
+            def parse(self):
+                return SimpleNamespace(id="resp_1", model="gpt-4", choices=[], usage=None)
+
+        class _FakeWithRawResponse:
+            def create(self, **params):
+                captured_params.update(params)
+                return _FakeRawResponse()
+
+        class _FakeCompletions:
+            with_raw_response = _FakeWithRawResponse()
+
+        class _FakeChat:
+            completions = _FakeCompletions()
+
+        class _FakeClient:
+            chat = _FakeChat()
+
+        monkeypatch.setattr(
+            "backend.alice.domain.llm.providers.openai_provider.OpenAI",
+            object,
+        )
+
+        provider = OpenAIProvider(OpenAIConfig(api_key="test-key", model_name="gpt-4"))
+        provider._client = _FakeClient()
+
+        provider._make_chat_request(
+            messages=[],
+            stream=True,
+            metadata={"trace_id": "trace-1", "request_id": "req-1"},
+            request_envelope={"request_metadata": {"trace_id": "trace-1"}},
+            tools=[{"type": "function", "function": {"name": "test"}}],
+            tool_choice="auto",
+        )
+
+        assert "metadata" not in captured_params
+        assert "request_envelope" not in captured_params
+        assert captured_params["tools"] == [{"type": "function", "function": {"name": "test"}}]
+        assert captured_params["tool_choice"] == "auto"
+        assert captured_params["stream"] is True
+        assert captured_params["model"] == "gpt-4"
+        assert captured_params["messages"] == []
+        assert "extra_headers" in captured_params
+        assert captured_params["extra_headers"]["User-Agent"] == "curl/8.0"
+
