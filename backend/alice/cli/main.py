@@ -30,13 +30,8 @@ def _prepare_process_environment() -> None:
 
 
 from backend.alice.application.agent import AliceAgent
-from backend.alice.application.services import OrchestrationService, LifecycleService
-from backend.alice.application.workflow import WorkflowChain, ChatWorkflow
 from backend.alice.application.dto import response_to_dict
-from backend.alice.core.config.loader import load_config
-from backend.alice.core.logging import configure_logging
-from backend.alice.core.registry import get_llm_registry
-from backend.alice.domain.llm.providers.base import ProviderCapability
+from backend.alice.cli.bootstrap import configure_runtime_logging, create_agent_from_env
 from backend.alice.infrastructure.bridge.legacy_compatibility_serializer import (
     serialize_error_message,
     serialize_status_message,
@@ -49,23 +44,6 @@ logger = logging.getLogger("AliceCLI")
 def _print_legacy_message(message: dict) -> None:
     print(json.dumps(message), flush=True)
 
-
-def _parse_request_header_profiles(profiles_str: str) -> list[dict]:
-    """解析环境变量中的请求头轮询配置。"""
-    if not profiles_str.strip():
-        return []
-
-    try:
-        parsed = json.loads(profiles_str)
-    except json.JSONDecodeError:
-        import ast
-
-        parsed = ast.literal_eval(profiles_str)
-
-    if not isinstance(parsed, list) or not all(isinstance(item, dict) for item in parsed):
-        raise ValueError("REQUEST_HEADER_PROFILES 必须是对象数组")
-
-    return parsed
 
 
 class TUIBridge:
@@ -100,76 +78,8 @@ class TUIBridge:
     def initialize(self) -> bool:
         """初始化 Agent"""
         try:
-            from dotenv import load_dotenv
-
-            load_dotenv()
-            settings = load_config()
-            settings.logging.console_level = "ERROR"
-            configure_logging(settings.logging)
-
-            api_key = os.getenv("API_KEY", "")
-            base_url = os.getenv("API_BASE_URL", "https://api-inference.modelscope.cn/v1/")
-            model_name = os.getenv("MODEL_NAME", "")
-            provider_name = os.getenv("PROVIDER_NAME", "openai")
-            skill_source_name = os.getenv("SKILL_SOURCE_NAME", "default")
-            harness_name = os.getenv("HARNESS_NAME", "docker")
-
-            if not api_key:
-                raise ValueError("API_KEY 环境变量未设置")
-            if not model_name:
-                raise ValueError("MODEL_NAME 环境变量未设置")
-
-            request_header_profiles = []
-            profiles_str = os.getenv("REQUEST_HEADER_PROFILES", "")
-            if profiles_str:
-                try:
-                    request_header_profiles = _parse_request_header_profiles(profiles_str)
-                except Exception:
-                    logger.warning("解析 REQUEST_HEADER_PROFILES 失败")
-            request_header_profiles = get_llm_registry().resolve_request_header_profiles(
-                provider_name,
-                base_url,
-                request_header_profiles,
-            )
-
-            capabilities = None
-            if os.getenv("PROVIDER_SUPPORTS_TOOL_CALLING", "").lower() in ("false", "0", "no"):
-                capabilities = ProviderCapability(supports_tool_calling=False)
-
-            orchestration = OrchestrationService.create_from_config(
-                api_key=api_key,
-                base_url=base_url,
-                model_name=model_name,
-                project_root=project_root,
-                extra_headers={},
-                request_header_profiles=request_header_profiles,
-                capabilities=capabilities,
-                provider_name=provider_name,
-                skill_source_name=skill_source_name,
-                harness_name=harness_name,
-            )
-
-            lifecycle = LifecycleService(
-                project_root=project_root,
-                backend=(orchestration.harness_bundle.backend if orchestration.harness_bundle else None),
-            )
-
-            workflow_chain = WorkflowChain()
-            workflow_chain.add_workflow(
-                ChatWorkflow(
-                    chat_service=orchestration.chat_service,
-                    execution_service=orchestration.execution_service,
-                    tool_registry=orchestration.tool_registry,
-                    function_calling_orchestrator=orchestration.function_calling_orchestrator,
-                )
-            )
-
-            self.agent = AliceAgent(
-                orchestration_service=orchestration,
-                lifecycle_service=lifecycle,
-                workflow_chain=workflow_chain,
-            )
-
+            configure_runtime_logging(console_level="ERROR")
+            self.agent = create_agent_from_env(project_root=project_root)
             logger.info("Alice Agent 初始化成功")
             return True
 
