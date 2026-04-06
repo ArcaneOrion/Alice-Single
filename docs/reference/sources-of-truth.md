@@ -9,6 +9,15 @@
   - `docs/reference/code-map-coupling.md`
 - 分层边界与依赖方向：
   - `docs/architecture/overview.md`
+- Frontend 状态流、TUI 主循环与交互边界：
+  - `docs/reference/code-map.md`
+  - `docs/reference/code-map-structure.md`
+  - `docs/reference/code-map-coupling.md`
+  - `frontend/src/main.rs`
+  - `frontend/src/app/state.rs`
+  - `frontend/src/core/dispatcher.rs`
+  - `frontend/src/ui/screen.rs`
+  - `frontend/src/bridge/client.rs`
 - Runtime Context、Request Envelope、Tool Registry 与工具调用编排：
   - `docs/reference/code-map.md`
   - `docs/reference/code-map-structure.md`
@@ -27,7 +36,11 @@
   - `backend/alice/application/dto/responses.py`
   - `backend/alice/infrastructure/bridge/legacy_compatibility_serializer.py`
   - `backend/alice/infrastructure/bridge/server.py`
+  - `backend/alice/infrastructure/gateway/`
   - `backend/alice/core/logging/configure.py`
+  - `frontend/src/bridge/client.rs`
+  - `frontend/src/bridge/transport/stdio_transport.rs`
+  - `frontend/src/core/dispatcher.rs`
   - `backend/tests/integration/test_bridge.py`
   - `backend/tests/integration/test_logging_e2e.py`
   - `backend/tests/unit/test_core/test_logging_schema.py`
@@ -44,6 +57,7 @@
   - `backend/tests/integration/test_logging_e2e.py`
 - 用户侧启动与交互：
   - 根目录 `README.md`
+  - `frontend/src/main.rs`
 
 ## 对代码地图的约束
 - `docs/reference/*` 是代码地图的权威来源。

@@ -19,10 +19,30 @@
 - [代码地图-耦合视图](./reference/code-map-coupling.md)
 - [文档权威来源表](./reference/sources-of-truth.md)
 
+### 想修改前端状态流 / TUI 事件循环
+- [代码地图总览](./reference/code-map.md)
+- [代码地图-结构视图](./reference/code-map-structure.md)
+- [代码地图-耦合视图](./reference/code-map-coupling.md)
+- `frontend/src/main.rs`
+- `frontend/src/app/state.rs`
+- `frontend/src/core/dispatcher.rs`
+- `frontend/src/ui/screen.rs`
+- `frontend/src/bridge/client.rs`
+
 ### 想修改 Bridge / 跨语言协议
 - [Bridge 协议与状态流](./protocols/bridge.md)
+- [代码地图-耦合视图](./reference/code-map-coupling.md)
 - [架构总览](./architecture/overview.md)
 - `protocols/bridge_schema.json`
+- `frontend/src/bridge/`
+- `backend/alice/infrastructure/bridge/`
+
+### 想修改 Gateway / WebSocket 会话传输
+- [代码地图总览](./reference/code-map.md)
+- [代码地图-结构视图](./reference/code-map-structure.md)
+- [代码地图-耦合视图](./reference/code-map-coupling.md)
+- `backend/alice/infrastructure/gateway/`
+- `backend/tests/unit/test_infrastructure/`
 
 ### 想修改应用分层或模块边界
 - [架构总览](./architecture/overview.md)
@@ -35,11 +55,19 @@
 - [代码地图-结构视图](./reference/code-map-structure.md)
 - [代码地图-耦合视图](./reference/code-map-coupling.md)
 - `backend/alice/application/runtime/`
+- `backend/alice/application/workflow/chat_workflow.py`
 - `backend/alice/application/workflow/function_calling_orchestrator.py`
+- `backend/alice/domain/llm/services/chat_service.py`
+- `backend/alice/domain/llm/services/stream_service.py`
 - `backend/alice/domain/execution/services/tool_registry.py`
 
 ### 想跑测试或补测试
 - [测试指南](./testing/guide.md)
+- `backend/tests/unit/test_domain/test_chat_workflow.py`
+- `backend/tests/unit/test_domain/test_stream_service.py`
+- `backend/tests/unit/test_domain/test_chat_service.py`
+- `backend/tests/integration/test_bridge.py`
+- `backend/tests/integration/test_logging_e2e.py`
 
 ### 想修改结构化日志
 - [Logging 专题首页](./operations/logging/README.md)
@@ -49,6 +77,11 @@
 
 ### 想确认运行时文件哪些不是设计文档
 - [权威来源与运行时数据边界](./reference/sources-of-truth.md)
+
+### 想看执行背景 / 演进计划
+- `../exec/README.md`
+- `../exec/harness-decoupling-context.md`
+- `../exec/harness-decoupling-plan.md`
 
 ## 文档结构
 ```text
@@ -71,6 +104,11 @@ docs/
     ├── code-map-structure.md
     ├── code-map-coupling.md
     └── sources-of-truth.md
+
+exec/
+├── README.md
+├── harness-decoupling-context.md
+└── harness-decoupling-plan.md
 ```
 
 ## 文档原则
