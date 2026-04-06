@@ -7,10 +7,10 @@ Docker Infrastructure Module
 - 容器执行与状态监控
 """
 
-from .config import DockerConfig, ContainerConfig, MountConfig
 from .client import DockerClient
+from .config import ContainerConfig, DockerConfig, MountConfig
+from .container_manager import ContainerManager, DockerExecutionBackend
 from .image_builder import ImageBuilder
-from .container_manager import ContainerManager
 
 __all__ = [
     "DockerConfig",
@@ -19,4 +19,5 @@ __all__ = [
     "DockerClient",
     "ImageBuilder",
     "ContainerManager",
+    "DockerExecutionBackend",
 ]
