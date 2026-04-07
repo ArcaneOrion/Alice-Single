@@ -1,0 +1,189 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+from backend.alice.core.config.settings import HarnessConfig, LLMConfig, MemoryConfig, Settings, WorkflowConfig
+from backend.alice.domain.llm.providers.base import ProviderCapability
+
+
+def test_create_agent_from_env_ignores_request_header_profiles_env(monkeypatch) -> None:
+    from backend.alice.cli import bootstrap
+
+    settings = Settings(
+        llm=LLMConfig(
+            api_key="test-key",
+            model_name="gpt-4.1",
+            base_url="https://example.com/v1",
+            provider_name="openai",
+            request_header_profiles=[{"X-Base": "1"}],
+        ),
+        workflow=WorkflowConfig(max_iterations=23, max_history=81),
+        memory=MemoryConfig(prompt_path=".alice/prompt.md"),
+        harness=HarnessConfig(name="docker", skill_source_name="default"),
+    )
+
+    monkeypatch.setattr(bootstrap, "load_config", lambda: settings)
+    monkeypatch.setenv("REQUEST_HEADER_PROFILES", '[{"X-Env":"1"}]')
+
+    class _Registry:
+        def resolve_request_header_profiles(self, provider_name, base_url, profiles):
+            return profiles
+
+    monkeypatch.setattr(bootstrap, "get_llm_registry", lambda: _Registry())
+    monkeypatch.setattr(
+        bootstrap.OrchestrationService,
+        "create_from_settings",
+        staticmethod(
+            lambda settings_arg, *, capabilities=None, extra_headers=None: SimpleNamespace(
+                chat_service="chat-service",
+                execution_service="execution-service",
+                tool_registry="tool-registry",
+                function_calling_orchestrator="tool-orchestrator",
+                harness_bundle=SimpleNamespace(backend="backend-instance"),
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        bootstrap,
+        "LifecycleService",
+        lambda *, project_root, backend: SimpleNamespace(project_root=project_root, backend=backend),
+    )
+
+    class _WorkflowChain:
+        def add_workflow(self, workflow):
+            self.workflow = workflow
+
+    monkeypatch.setattr(bootstrap, "WorkflowChain", _WorkflowChain)
+    monkeypatch.setattr(bootstrap, "ChatWorkflow", lambda **kwargs: SimpleNamespace(**kwargs))
+    monkeypatch.setattr(bootstrap, "AliceAgent", lambda **kwargs: SimpleNamespace(**kwargs))
+
+    bootstrap.create_agent_from_env(project_root=settings.project_root)
+
+    assert settings.llm.request_header_profiles == [{"X-Base": "1"}]
+
+
+def test_create_agent_from_env_reports_missing_config(monkeypatch) -> None:
+    from backend.alice.cli import bootstrap
+
+    settings = Settings(
+        llm=LLMConfig(api_key="", model_name=""),
+        workflow=WorkflowConfig(),
+        memory=MemoryConfig(),
+        harness=HarnessConfig(),
+    )
+
+    monkeypatch.setattr(bootstrap, "load_config", lambda: settings)
+
+    class _Registry:
+        def resolve_request_header_profiles(self, provider_name, base_url, profiles):
+            return profiles
+
+    monkeypatch.setattr(bootstrap, "get_llm_registry", lambda: _Registry())
+
+    try:
+        bootstrap.create_agent_from_env(project_root=settings.project_root)
+    except ValueError as exc:
+        assert str(exc) == "LLM 配置缺少 api_key"
+    else:
+        raise AssertionError("expected ValueError")
+
+
+def test_create_agent_from_env_builds_workflow_from_settings(monkeypatch) -> None:
+    from backend.alice.cli import bootstrap
+
+    settings = Settings(
+        llm=LLMConfig(
+            api_key="test-key",
+            model_name="gpt-4.1",
+            base_url="https://example.com/v1",
+            provider_name="openai",
+            request_header_profiles=[{"X-Base": "1"}],
+            supports_tool_calling=False,
+        ),
+        workflow=WorkflowConfig(max_iterations=23, max_history=81),
+        memory=MemoryConfig(prompt_path=".alice/prompt.md"),
+        harness=HarnessConfig(name="docker", skill_source_name="default"),
+    )
+
+    orchestration_calls: dict[str, object] = {}
+    workflow_kwargs: dict[str, object] = {}
+    lifecycle_kwargs: dict[str, object] = {}
+    agent_kwargs: dict[str, object] = {}
+
+    monkeypatch.setattr(bootstrap, "load_config", lambda: settings)
+
+    class _Registry:
+        def resolve_request_header_profiles(self, provider_name, base_url, profiles):
+            assert provider_name == "openai"
+            assert base_url == "https://example.com/v1"
+            return profiles + [{"X-Resolved": "1"}]
+
+    monkeypatch.setattr(bootstrap, "get_llm_registry", lambda: _Registry())
+
+    def fake_create_from_settings(settings_arg, *, capabilities=None, extra_headers=None):
+        orchestration_calls["settings"] = settings_arg
+        orchestration_calls["capabilities"] = capabilities
+        orchestration_calls["extra_headers"] = extra_headers
+        return SimpleNamespace(
+            chat_service="chat-service",
+            execution_service="execution-service",
+            tool_registry="tool-registry",
+            function_calling_orchestrator="tool-orchestrator",
+            harness_bundle=SimpleNamespace(backend="backend-instance"),
+        )
+
+    monkeypatch.setattr(
+        bootstrap.OrchestrationService,
+        "create_from_settings",
+        staticmethod(fake_create_from_settings),
+    )
+
+    class _LifecycleService:
+        def __init__(self, *, project_root, backend):
+            lifecycle_kwargs["project_root"] = project_root
+            lifecycle_kwargs["backend"] = backend
+
+    monkeypatch.setattr(bootstrap, "LifecycleService", _LifecycleService)
+
+    class _WorkflowChain:
+        def __init__(self):
+            self.workflows = []
+
+        def add_workflow(self, workflow):
+            self.workflows.append(workflow)
+
+    monkeypatch.setattr(bootstrap, "WorkflowChain", _WorkflowChain)
+
+    def fake_chat_workflow(**kwargs):
+        workflow_kwargs.update(kwargs)
+        return SimpleNamespace(**kwargs)
+
+    monkeypatch.setattr(bootstrap, "ChatWorkflow", fake_chat_workflow)
+
+    class _AliceAgent:
+        def __init__(self, **kwargs):
+            agent_kwargs.update(kwargs)
+
+    monkeypatch.setattr(bootstrap, "AliceAgent", _AliceAgent)
+
+    project_root = settings.project_root
+    bootstrap.create_agent_from_env(
+        project_root=project_root,
+        harness_name="sandbox-harness",
+        skill_source_name="repo-skills",
+    )
+
+    assert settings.harness.name == "sandbox-harness"
+    assert settings.harness.skill_source_name == "repo-skills"
+    assert settings.llm.request_header_profiles == [{"X-Base": "1"}, {"X-Resolved": "1"}]
+    assert orchestration_calls["settings"] is settings
+    assert orchestration_calls["extra_headers"] is None
+    capabilities = orchestration_calls["capabilities"]
+    assert isinstance(capabilities, ProviderCapability)
+    assert capabilities.supports_tool_calling is False
+    assert workflow_kwargs["max_iterations"] == 23
+    assert lifecycle_kwargs["project_root"] == project_root
+    assert lifecycle_kwargs["backend"] == "backend-instance"
+    orchestration = agent_kwargs["orchestration_service"]
+    assert isinstance(orchestration, SimpleNamespace)
+    assert orchestration.chat_service == "chat-service"

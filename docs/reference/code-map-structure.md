@@ -24,8 +24,8 @@
 - `backend/alice/application/runtime/`：定义 `RuntimeContext`、`RequestEnvelope`、`RequestMetadata`、`TimeProvider` 与 `RuntimeContextBuilder`；builder 同时负责 runtime 视图与 canonical model request envelope。
 - `backend/alice/application/agent/`：请求入口与中断控制；`agent.py` 负责补齐 correlation ids、构建 `runtime_context` 与 `request_envelope`，并一并挂到 workflow。
 - `backend/alice/application/workflow/`：工作流编排；`base_workflow.py` 的 `WorkflowContext` 同时携带 `runtime_context` 与 `request_envelope`，`chat_workflow.py` 是 canonical runtime event 与 tool loop 编排中心，`function_calling_orchestrator.py` 负责 structured tool call -> execution -> tool message 回注。
-- `backend/alice/application/services/`：编排服务；`orchestration_service.py` 收敛 memory、skills、tool registry、stream service 与 function-calling orchestrator。
-- `backend/alice/cli/`：当前默认 Python CLI / TUI bridge 入口；`main.py` 通过 `bootstrap.py` 收口 runtime logging、provider / skill / harness 装配与共享 backend owner。
+- `backend/alice/application/services/`：编排服务；`orchestration_service.py` 收敛 memory、skills、tool registry、stream service 与 function-calling orchestrator，并新增 `create_from_settings()` 作为 `Settings -> runtime assembly` 的集中入口。
+- `backend/alice/cli/`：当前默认 Python CLI / TUI bridge 入口；`main.py` 通过 `bootstrap.py` 收口 runtime logging、`.alice/config.json` / env 合并、provider / skill / harness 装配与共享 backend owner。
 - `backend/alice/domain/`：execution、llm、memory、skills 等业务逻辑。
 - `backend/alice/domain/execution/services/`：`execution_service.py` 负责结构化工具执行与 snapshot manager，`tool_registry.py` 提供工具快照与模型 function schema。
 - `backend/alice/domain/llm/services/`：`chat_service.py` 负责把 runtime context 投影成 model-visible system prompt 并组装 `RequestEnvelope`，`stream_service.py` 负责 runtime event、provider binding 与 structured tool-calling 流式输出。

@@ -1,187 +1,144 @@
-"""
-配置加载器
+from __future__ import annotations
 
-从 TOML 文件和环境变量加载配置
-"""
+"""配置加载器。"""
 
+import json
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Any
 
-from .settings import Settings, LLMConfig, MemoryConfig, DockerConfig, LoggingConfig
-
-try:
-    import tomllib as toml
-except ModuleNotFoundError:
-    import tomli as toml
+from .settings import (
+    DockerConfig,
+    HarnessConfig,
+    LLMConfig,
+    LoggingConfig,
+    MemoryConfig,
+    Settings,
+    WorkflowConfig,
+)
 
 
 class ConfigLoader:
     """配置加载器"""
 
-    DEFAULT_CONFIG_PATHS = [
-        "alice.toml",
-        "config/alice.toml",
-        "/etc/alice/config.toml",
-    ]
+    DEFAULT_CONFIG_PATHS = [".alice/config.json"]
 
-    def __init__(self, config_path: Optional[str] = None):
+    def __init__(self, config_path: str | None = None):
         self.config_path = config_path
 
     def load(self) -> Settings:
         """加载配置"""
-        # 1. 从文件加载
-        settings = self._load_from_file()
-
-        # 2. 从环境变量覆盖
-        self._apply_env_vars(settings)
-
-        # 3. 验证配置
-        # from .validator import ConfigValidator
-        # ConfigValidator.validate(settings)
-
-        return settings
+        return self._load_from_file()
 
     def _load_from_file(self) -> Settings:
-        """从文件加载配置"""
-        config_path = self._find_config_file()
-        if config_path is None:
-            return Settings()  # 返回默认配置
+        """从 JSON 文件加载配置"""
+        config_path = self._resolve_config_path()
+        if config_path.suffix and config_path.suffix.lower() != ".json":
+            raise ValueError("运行时配置源只接受 JSON 文件")
 
-        try:
-            with open(config_path, "rb") as f:
-                data = toml.load(f)
-            return self._parse_toml(data)
-        except Exception as e:
-            print(f"Warning: Failed to load config from {config_path}: {e}")
-            return Settings()
+        settings = self._default_settings(config_path)
+        if not config_path.exists():
+            return settings
 
-    def _find_config_file(self) -> Optional[Path]:
-        """查找配置文件"""
-        if self.config_path:
-            path = Path(self.config_path)
-            if path.exists():
-                return path
+        with open(config_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return self._parse_json(data, config_path=config_path)
 
-        for candidate in self.DEFAULT_CONFIG_PATHS:
-            path = Path(candidate)
-            if path.exists():
-                return path
+    def _resolve_config_path(self) -> Path:
+        if self.config_path is not None:
+            return Path(self.config_path)
+        return Path(self.DEFAULT_CONFIG_PATHS[0])
 
-        return None
+    def _default_settings(self, config_path: Path) -> Settings:
+        project_root = config_path.parent.parent if config_path.name == "config.json" and config_path.parent.name == ".alice" else Path.cwd()
+        return Settings(project_root=project_root, config_path=".alice/config.json")
 
-    def _parse_toml(self, data: dict) -> Settings:
-        """解析 TOML 数据"""
-        return Settings(
-            llm=self._parse_llm_config(data.get("llm", {})),
-            memory=self._parse_memory_config(data.get("memory", {})),
-            docker=self._parse_docker_config(data.get("docker", {})),
-            logging=self._parse_logging_config(data.get("logging", {})),
-        )
+    def _parse_json(self, data: dict[str, Any], *, config_path: Path) -> Settings:
+        settings = self._default_settings(config_path)
+        settings.llm = self._parse_llm_config(data.get("llm", {}), settings.llm)
+        settings.workflow = self._parse_workflow_config(data.get("workflow", {}), settings.workflow)
+        settings.memory = self._parse_memory_config(data.get("memory", {}), settings.memory)
+        settings.harness = self._parse_harness_config(data.get("harness", {}), settings.harness)
+        settings.docker = self._parse_docker_config(data.get("docker", {}), settings.docker)
+        settings.logging = self._parse_logging_config(data.get("logging", {}), settings.logging)
+        if output_dir := data.get("output_dir"):
+            settings.output_dir = output_dir
+        if skills_dir := data.get("skills_dir"):
+            settings.skills_dir = skills_dir
+        return settings
 
-    def _parse_llm_config(self, data: dict) -> LLMConfig:
-        """解析 LLM 配置"""
+    def _parse_llm_config(self, data: dict[str, Any], defaults: LLMConfig) -> LLMConfig:
         return LLMConfig(
-            model_name=data.get("model_name", "gpt-4"),
-            api_key=data.get("api_key", ""),
-            base_url=data.get("base_url", "https://api.openai.com/v1"),
-            max_tokens=data.get("max_tokens", 4096),
-            temperature=data.get("temperature", 0.7),
-            enable_thinking=data.get("enable_thinking", True),
-            timeout=data.get("timeout", 120),
+            model_name=data.get("model_name", defaults.model_name),
+            api_key=data.get("api_key", defaults.api_key),
+            base_url=data.get("base_url", defaults.base_url),
+            provider_name=data.get("provider_name", defaults.provider_name),
+            request_header_profiles=data.get("request_header_profiles", defaults.request_header_profiles),
+            supports_tool_calling=data.get("supports_tool_calling", defaults.supports_tool_calling),
+            max_tokens=data.get("max_tokens", defaults.max_tokens),
+            temperature=data.get("temperature", defaults.temperature),
+            enable_thinking=data.get("enable_thinking", defaults.enable_thinking),
+            timeout=data.get("timeout", defaults.timeout),
         )
 
-    def _parse_memory_config(self, data: dict) -> MemoryConfig:
-        """解析内存配置"""
+    def _parse_workflow_config(self, data: dict[str, Any], defaults: WorkflowConfig) -> WorkflowConfig:
+        return WorkflowConfig(
+            max_iterations=data.get("max_iterations", defaults.max_iterations),
+            max_history=data.get("max_history", defaults.max_history),
+        )
+
+    def _parse_memory_config(self, data: dict[str, Any], defaults: MemoryConfig) -> MemoryConfig:
         return MemoryConfig(
-            working_memory_max_rounds=data.get("working_memory_max_rounds", 30),
-            stm_expiry_days=data.get("stm_expiry_days", 7),
-            ltm_auto_distill=data.get("ltm_auto_distill", True),
-            working_memory_path=data.get("working_memory_path", "memory/working_memory.md"),
-            stm_path=data.get("stm_path", "memory/short_term_memory.md"),
-            ltm_path=data.get("ltm_path", "memory/alice_memory.md"),
-            todo_path=data.get("todo_path", "memory/todo.md"),
+            prompt_path=data.get("prompt_path", defaults.prompt_path),
+            working_memory_path=data.get("working_memory_path", defaults.working_memory_path),
+            stm_path=data.get("stm_path", defaults.stm_path),
+            ltm_path=data.get("ltm_path", defaults.ltm_path),
+            todo_path=data.get("todo_path", defaults.todo_path),
+            max_rounds=data.get("max_rounds", data.get("working_memory_max_rounds", defaults.max_rounds)),
+            stm_days_to_keep=data.get("stm_days_to_keep", data.get("stm_expiry_days", defaults.stm_days_to_keep)),
+            ltm_auto_distill=data.get("ltm_auto_distill", defaults.ltm_auto_distill),
         )
 
-    def _parse_docker_config(self, data: dict) -> DockerConfig:
-        """解析 Docker 配置"""
+    def _parse_harness_config(self, data: dict[str, Any], defaults: HarnessConfig) -> HarnessConfig:
+        return HarnessConfig(
+            name=data.get("name", defaults.name),
+            skill_source_name=data.get("skill_source_name", defaults.skill_source_name),
+        )
+
+    def _parse_docker_config(self, data: dict[str, Any], defaults: DockerConfig) -> DockerConfig:
         return DockerConfig(
-            image_name=data.get("image_name", "alice-sandbox:latest"),
-            container_name=data.get("container_name", "alice-sandbox-instance"),
-            work_dir=data.get("work_dir", "/app"),
-            mounts=data.get("mounts", {}),
-            timeout=data.get("timeout", 120),
+            image_name=data.get("image_name", defaults.image_name),
+            container_name=data.get("container_name", defaults.container_name),
+            work_dir=data.get("work_dir", defaults.work_dir),
+            dockerfile_path=data.get("dockerfile_path", defaults.dockerfile_path),
+            mounts=data.get("mounts", defaults.mounts),
+            timeout=data.get("timeout", defaults.timeout),
         )
 
-    def _parse_logging_config(self, data: dict) -> LoggingConfig:
-        """解析日志配置"""
+    def _parse_logging_config(self, data: dict[str, Any], defaults: LoggingConfig) -> LoggingConfig:
         return LoggingConfig(
-            level=data.get("level", "INFO"),
-            format=data.get("format", "%(asctime)s [%(levelname)s] %(name)s: %(message)s"),
-            file=data.get("file", "alice_runtime.log"),
-            enable_colors=data.get("enable_colors", True),
-            max_size_mb=data.get("max_size_mb", 10),
-            backup_count=data.get("backup_count", 3),
-            enable_structured=data.get("enable_structured", True),
-            dual_write_legacy=data.get("dual_write_legacy", True),
-            logs_dir=data.get("logs_dir", ".alice/logs"),
-            system_log_file=data.get("system_log_file", "system.jsonl"),
-            tasks_log_file=data.get("tasks_log_file", "tasks.jsonl"),
-            changes_log_file=data.get("changes_log_file", "changes.jsonl"),
-            schema_file=data.get("schema_file", "schema_version.json"),
-            payload_depth=data.get("payload_depth", -1),
-            redaction_policy=data.get("redaction_policy", "minimal"),
-            capture_thinking=data.get("capture_thinking", True),
-            capture_api_headers=data.get("capture_api_headers", True),
-            capture_api_bodies=data.get("capture_api_bodies", True),
-            capture_tool_io=data.get("capture_tool_io", True),
-            max_field_length=data.get("max_field_length", 0),
+            level=data.get("level", defaults.level),
+            console_level=data.get("console_level", defaults.console_level),
+            format=data.get("format", defaults.format),
+            file=data.get("file", defaults.file),
+            enable_colors=data.get("enable_colors", defaults.enable_colors),
+            max_size_mb=data.get("max_size_mb", defaults.max_size_mb),
+            backup_count=data.get("backup_count", defaults.backup_count),
+            enable_structured=data.get("enable_structured", defaults.enable_structured),
+            dual_write_legacy=data.get("dual_write_legacy", defaults.dual_write_legacy),
+            logs_dir=data.get("logs_dir", defaults.logs_dir),
+            system_log_file=data.get("system_log_file", defaults.system_log_file),
+            tasks_log_file=data.get("tasks_log_file", defaults.tasks_log_file),
+            changes_log_file=data.get("changes_log_file", defaults.changes_log_file),
+            schema_file=data.get("schema_file", defaults.schema_file),
+            payload_depth=data.get("payload_depth", defaults.payload_depth),
+            redaction_policy=data.get("redaction_policy", defaults.redaction_policy),
+            capture_thinking=data.get("capture_thinking", defaults.capture_thinking),
+            capture_api_headers=data.get("capture_api_headers", defaults.capture_api_headers),
+            capture_api_bodies=data.get("capture_api_bodies", defaults.capture_api_bodies),
+            capture_tool_io=data.get("capture_tool_io", defaults.capture_tool_io),
+            max_field_length=data.get("max_field_length", defaults.max_field_length),
         )
-
-    def _apply_env_vars(self, settings: Settings) -> None:
-        """应用环境变量覆盖"""
-        # LLM 配置
-        if api_key := os.getenv("API_KEY"):
-            settings.llm.api_key = api_key
-        if base_url := os.getenv("API_BASE_URL"):
-            settings.llm.base_url = base_url
-        if model_name := os.getenv("MODEL_NAME"):
-            settings.llm.model_name = model_name
-
-        # 内存配置
-        if max_rounds := os.getenv("WORKING_MEMORY_MAX_ROUNDS"):
-            settings.memory.working_memory_max_rounds = int(max_rounds)
-
-        # 日志配置
-        if log_level := os.getenv("LOG_LEVEL"):
-            settings.logging.level = log_level
-        if structured := os.getenv("LOG_ENABLE_STRUCTURED"):
-            settings.logging.enable_structured = self._parse_bool(structured)
-        if dual_write := os.getenv("LOG_DUAL_WRITE_LEGACY"):
-            settings.logging.dual_write_legacy = self._parse_bool(dual_write)
-        if logs_dir := os.getenv("LOGS_DIR"):
-            settings.logging.logs_dir = logs_dir
-        if payload_depth := os.getenv("LOG_PAYLOAD_DEPTH"):
-            settings.logging.payload_depth = int(payload_depth)
-        if redaction_policy := os.getenv("LOG_REDACTION_POLICY"):
-            settings.logging.redaction_policy = redaction_policy
-        if capture_thinking := os.getenv("LOG_CAPTURE_THINKING"):
-            settings.logging.capture_thinking = self._parse_bool(capture_thinking)
-        if capture_api_headers := os.getenv("LOG_CAPTURE_API_HEADERS"):
-            settings.logging.capture_api_headers = self._parse_bool(capture_api_headers)
-        if capture_api_bodies := os.getenv("LOG_CAPTURE_API_BODIES"):
-            settings.logging.capture_api_bodies = self._parse_bool(capture_api_bodies)
-        if capture_tool_io := os.getenv("LOG_CAPTURE_TOOL_IO"):
-            settings.logging.capture_tool_io = self._parse_bool(capture_tool_io)
-        if max_field_length := os.getenv("LOG_MAX_FIELD_LENGTH"):
-            settings.logging.max_field_length = int(max_field_length)
-        if legacy_mode := os.getenv("USE_LEGACY_LOGGING"):
-            use_legacy = self._parse_bool(legacy_mode)
-            settings.logging.enable_structured = not use_legacy
-
-    @staticmethod
-    def _parse_bool(value: str) -> bool:
-        return value.lower() in {"1", "true", "yes", "on"}
 
     @staticmethod
     def expand_env_vars(value: str) -> str:
@@ -192,10 +149,10 @@ class ConfigLoader:
             var_name = match.group(1)
             return os.getenv(var_name, match.group(0))
 
-        return re.sub(r'\$\{([^}]+)\}', replace_env_var, value)
+        return re.sub(r"\$\{([^}]+)\}", replace_env_var, value)
 
 
-def load_config(config_path: Optional[str] = None) -> Settings:
+def load_config(config_path: str | None = None) -> Settings:
     """便捷函数：加载配置"""
     loader = ConfigLoader(config_path)
     return loader.load()

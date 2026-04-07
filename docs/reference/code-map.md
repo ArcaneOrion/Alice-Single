@@ -1,8 +1,8 @@
 # 代码地图总览
 
-> 同步时间：2026-04-06
+> 同步时间：2026-04-07
 >
-> 同步基线 commit：1a5962f
+> 同步基线 commit：1e2fcc2
 >
 > 维护规则：先更新 `docs/reference/*`，再在代码结构、专题导航或高耦合区域变更后同步本页；若结构视图与耦合视图不一致，以实际代码与对应专题文档为准，并尽快回补。
 
@@ -19,7 +19,7 @@
 - `backend/alice/`：Python 引擎，负责 agent、workflow、memory、tool execution，以及 canonical runtime context / request envelope -> legacy bridge compatibility 输出；当前树里也已包含 gateway/websocket transport 适配层。
 - `backend/tests/`：后端测试，含 unit / integration / performance。
 - `protocols/`：共享协议与 schema。
-- `prompts/`：系统提示词与 prompt 资产。
+- `.alice/`：运行时配置与产物目录，默认包含唯一运行时配置源 `.alice/config.json`，以及 prompt、memory、logs、output 等运行时文件。
 - `skills/`：技能资源与 `SKILL.md`。
 - `docs/`：面向 agent 的结构化知识库。
 
@@ -29,7 +29,7 @@
 - Gateway / WebSocket 会话传输：优先看 `backend/alice/infrastructure/gateway/`、`backend/tests/unit/test_infrastructure/`，以及 canonical runtime event / request interrupt / replay 相关路径。
 - Agent 工作流：优先看 `backend/alice/application/workflow/`、`backend/alice/domain/llm/services/`、`backend/alice/application/agent/`。
 - Runtime Context / Request Envelope / Model-visible Context / Tool Binding：优先看 `backend/alice/application/runtime/`、`backend/alice/application/workflow/`、`backend/alice/domain/llm/services/`、`backend/alice/domain/execution/services/`。
-- 配置 / 容器 / 日志：优先看 `backend/alice/core/`（尤其 `logging/configure.py`）、`backend/alice/infrastructure/`、`docs/operations/logging/`。
+- 配置 / 容器 / 日志：优先看 `backend/alice/core/`（尤其 `config/`、`logging/configure.py`）、`backend/alice/cli/bootstrap.py`、`backend/alice/infrastructure/`、`docs/operations/logging/`。
 - 技能系统：优先看 `skills/`、`backend/alice/domain/skills/`。
 - 测试补齐：优先看 `backend/tests/` 与对应实现目录；当前最小主回归入口是 `backend/tests/unit/test_domain/test_chat_workflow.py`、`backend/tests/unit/test_domain/test_stream_service.py`、`backend/tests/unit/test_domain/test_chat_service.py`、`backend/tests/integration/test_bridge.py`、`backend/tests/integration/test_logging_e2e.py`。
 

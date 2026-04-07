@@ -115,6 +115,23 @@
 - `StreamService.build_tool_kwargs()` 是当前显式 capability gate、tool binding 与 binding 日志的单点；若改绑定规则，至少同步看 `chat_workflow.py` 的 request kwargs 装配、`test_stream_service.py` 与 `test_provider_capability.py`。
 - `ChatWorkflow` 负责准备 iteration 级 `request_envelope` 与 provider metadata 投影，但不应再复制第二套 capability 决策逻辑。
 
+## 配置 / CLI 启动装配
+通常联动：
+- `backend/alice/core/config/settings.py`
+- `backend/alice/core/config/loader.py`
+- `backend/alice/cli/bootstrap.py`
+- `backend/alice/application/services/orchestration_service.py`
+- `backend/alice/domain/execution/services/execution_service.py`
+- `backend/tests/unit/test_core/test_config_loader.py`
+- `backend/tests/unit/test_cli/test_bootstrap.py`
+- `backend/tests/unit/test_application/test_orchestration_service.py`
+
+当前边界：
+- `.alice/config.json` 已是运行时配置源，`ConfigLoader` 负责把 JSON 解析为 `Settings`，再叠加环境变量覆盖。
+- `bootstrap.create_agent_from_env()` 负责把 `Settings`、请求头 profile 解析和 provider capability 拼成启动装配，不应在 CLI 主链继续散落第二套默认值。
+- `OrchestrationService.create_from_settings()` 是 `Settings -> create_from_config()` 的显式透传边界；若新增运行时配置字段，至少同步看 loader、bootstrap、orchestration 与对应单测。
+- `ExecutionService._update_prompt_file()` 已通过 `settings.get_absolute_path(settings.prompt_path)` 走统一配置路径，修改 prompt/memory 路径语义时要一起回归。
+
 ## Gateway / WebSocket 传输
 通常联动：
 - `backend/alice/infrastructure/gateway/server.py`

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from pathlib import Path
 
 from backend.alice.application.agent import AliceAgent
@@ -50,52 +49,34 @@ def create_agent_from_env(
     harness_name: str | None = None,
     skill_source_name: str | None = None,
 ) -> AliceAgent:
-    """基于当前环境变量创建与 execution 主链共享 backend owner 的 AliceAgent。"""
+    """基于配置创建 AliceAgent。"""
     from dotenv import load_dotenv
 
     load_dotenv()
-    api_key = os.getenv("API_KEY", "")
-    base_url = os.getenv("API_BASE_URL", "https://api-inference.modelscope.cn/v1/")
-    model_name = os.getenv("MODEL_NAME", "")
-    provider_name = os.getenv("PROVIDER_NAME", "openai")
-    skill_source_name = skill_source_name or os.getenv("SKILL_SOURCE_NAME", "default")
-    harness_name = harness_name or os.getenv("HARNESS_NAME", "docker")
+    settings = load_config()
+    settings.project_root = project_root
 
-    if not api_key:
-        raise ValueError("API_KEY 环境变量未设置")
-    if not model_name:
-        raise ValueError("MODEL_NAME 环境变量未设置")
+    if harness_name is not None:
+        settings.harness.name = harness_name
+    if skill_source_name is not None:
+        settings.harness.skill_source_name = skill_source_name
 
-    request_header_profiles: list[dict] = []
-    profiles_str = os.getenv("REQUEST_HEADER_PROFILES", "")
-    if profiles_str:
-        try:
-            request_header_profiles = parse_request_header_profiles(profiles_str)
-        except Exception:
-            logger.warning("解析 REQUEST_HEADER_PROFILES 失败")
-
-    request_header_profiles = get_llm_registry().resolve_request_header_profiles(
-        provider_name,
-        base_url,
-        request_header_profiles,
+    settings.llm.request_header_profiles = get_llm_registry().resolve_request_header_profiles(
+        settings.llm.provider_name,
+        settings.llm.base_url,
+        settings.llm.request_header_profiles,
     )
 
     capabilities = None
-    if os.getenv("PROVIDER_SUPPORTS_TOOL_CALLING", "").lower() in ("false", "0", "no"):
+    if not settings.llm.supports_tool_calling:
         capabilities = ProviderCapability(supports_tool_calling=False)
 
-    orchestration = OrchestrationService.create_from_config(
-        api_key=api_key,
-        base_url=base_url,
-        model_name=model_name,
-        project_root=project_root,
-        extra_headers={},
-        request_header_profiles=request_header_profiles,
-        capabilities=capabilities,
-        provider_name=provider_name,
-        skill_source_name=skill_source_name,
-        harness_name=harness_name,
-    )
+    if not settings.llm.api_key:
+        raise ValueError("LLM 配置缺少 api_key")
+    if not settings.llm.model_name:
+        raise ValueError("LLM 配置缺少 model_name")
+
+    orchestration = OrchestrationService.create_from_settings(settings, capabilities=capabilities)
 
     lifecycle = LifecycleService(
         project_root=project_root,
@@ -109,6 +90,7 @@ def create_agent_from_env(
             execution_service=orchestration.execution_service,
             tool_registry=orchestration.tool_registry,
             function_calling_orchestrator=orchestration.function_calling_orchestrator,
+            max_iterations=settings.workflow.max_iterations,
         )
     )
 

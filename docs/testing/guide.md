@@ -37,6 +37,27 @@ cd frontend && cargo clippy
 cd frontend && cargo fmt --check
 ```
 
+## 配置 / CLI 装配最小验证集
+
+当你改的是 `.alice/config.json`、`Settings`、`ConfigLoader`、`bootstrap.py`、`OrchestrationService` 配置透传或 prompt 路径解析时，优先跑这组最小回归。
+
+本组回归默认守住一个前提：**`.alice/config.json` 是唯一运行时配置源**。修改后应确认模型、header profiles、memory/logging 路径等行为**不会再被环境变量覆盖**。
+
+```bash
+python -m pytest backend/tests/unit/test_core/test_config_loader.py
+python -m pytest backend/tests/unit/test_cli/test_bootstrap.py
+python -m pytest backend/tests/unit/test_application/test_orchestration_service.py
+python -m pytest backend/tests/unit/test_application/test_lifecycle_service.py
+python -m pytest backend/tests/unit/test_domain/test_provider_capability.py
+```
+
+这组命令分别守住五条边界：
+- `test_config_loader.py`: `.alice/config.json -> Settings` 解析与默认值
+- `test_bootstrap.py`: CLI 启动装配、request header profile 解析、workflow max_iterations 接线
+- `test_orchestration_service.py`: `Settings -> create_from_config()` 透传边界
+- `test_lifecycle_service.py`: lifecycle 与 runtime backend owner 装配
+- `test_provider_capability.py`: tool-calling capability 与 provider capability dataclass
+
 ## backend-only 最小验证集
 
 当你改的是 backend runtime、function calling、legacy serializer、logging，且**没有修改 frontend wire contract** 时，优先跑这组最小回归：

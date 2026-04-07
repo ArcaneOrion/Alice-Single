@@ -14,6 +14,7 @@ from typing import Any, Optional
 RuntimeContextBuilder = import_module(
     "backend.alice.application.runtime"
 ).RuntimeContextBuilder
+from backend.alice.core.config.settings import Settings
 from backend.alice.core.registry import (
     ProviderCreateOptions,
     get_command_registry,
@@ -65,25 +66,55 @@ class OrchestrationService:
         self.runtime_context: dict[str, object] = {}
 
     @classmethod
+    def create_from_settings(
+        cls,
+        settings: Settings,
+        *,
+        capabilities: ProviderCapability | None = None,
+        extra_headers: dict | None = None,
+    ) -> "OrchestrationService":
+        return cls.create_from_config(
+            api_key=settings.llm.api_key,
+            base_url=settings.llm.base_url,
+            model_name=settings.llm.model_name,
+            project_root=settings.project_root,
+            prompt_path=settings.memory.prompt_path,
+            working_memory_path=settings.memory.working_memory_path,
+            stm_path=settings.memory.stm_path,
+            ltm_path=settings.memory.ltm_path,
+            todo_path=settings.memory.todo_path,
+            max_working_rounds=settings.memory.max_rounds,
+            stm_days_to_keep=settings.memory.stm_days_to_keep,
+            extra_headers=extra_headers,
+            request_header_profiles=settings.llm.request_header_profiles,
+            capabilities=capabilities,
+            provider_name=settings.llm.provider_name,
+            skill_source_name=settings.harness.skill_source_name,
+            harness_name=settings.harness.name,
+            max_history=settings.workflow.max_history,
+        )
+
+    @classmethod
     def create_from_config(
         cls,
         api_key: str,
         base_url: str,
         model_name: str,
         project_root: Path,
-        prompt_path: str = "prompts/alice.md",
-        working_memory_path: str = "memory/working_memory.md",
-        stm_path: str = "memory/short_term_memory.md",
-        ltm_path: str = "memory/alice_memory.md",
-        todo_path: str = "memory/todo.md",
-        max_working_rounds: int = 30,
-        stm_days_to_keep: int = 7,
+        prompt_path: str,
+        working_memory_path: str,
+        stm_path: str,
+        ltm_path: str,
+        todo_path: str,
+        max_working_rounds: int,
+        stm_days_to_keep: int,
+        provider_name: str,
+        skill_source_name: str,
+        harness_name: str,
+        max_history: int,
         extra_headers: dict | None = None,
         request_header_profiles: list[dict] | None = None,
         capabilities: ProviderCapability | None = None,
-        provider_name: str = "openai",
-        skill_source_name: str = "default",
-        harness_name: str = "docker",
         _todo_path: str | None = None,
     ) -> "OrchestrationService":
         _ = todo_path, _todo_path
@@ -135,7 +166,7 @@ class OrchestrationService:
         chat_service = ChatService(
             provider=llm_provider,
             system_prompt=system_prompt,
-            max_history=50,
+            max_history=max_history,
         )
         stream_service = StreamService(provider=llm_provider)
         function_calling_orchestrator_cls = import_module(

@@ -601,7 +601,7 @@ class ExecutionService(_ExecutionServiceBase):
         try:
             with open(prompt_path, "w", encoding="utf-8") as f:
                 f.write(content.strip())
-            return "已成功更新宿主机人设文件 (prompts/alice.md)。新指令将在下一轮对话生效。"
+            return f"已成功更新宿主人设文件 ({settings.memory.prompt_path})。新指令将在下一轮对话生效。"
         except Exception as e:
             return f"更新人设文件失败: {str(e)}"
 

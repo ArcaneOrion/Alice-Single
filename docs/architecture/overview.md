@@ -8,7 +8,7 @@
 Alice-Single 由四个核心部分组成：
 
 - `frontend/`: Rust TUI，负责交互、渲染、输入和与后端的桥接。
-- `backend/alice/`: Python 引擎，负责 workflow、ReAct、领域能力与基础设施适配。
+- `backend/alice/`: Python 引擎，负责 workflow、LLM 编排、领域能力与基础设施适配。
 - `protocols/`: 共享协议与 schema，尤其是 Bridge contract。
 - `Dockerfile.sandbox`: 沙盒执行环境定义。
 
