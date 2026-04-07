@@ -31,7 +31,7 @@ class LLMConfig:
 class MemoryConfig:
     """内存配置"""
 
-    prompt_path: str = ".alice/prompt.md"
+    prompt_path: str = ".alice/prompt.xml"
     working_memory_path: str = ".alice/memory/working_memory.md"
     stm_path: str = ".alice/memory/short_term_memory.md"
     ltm_path: str = ".alice/memory/alice_memory.md"

@@ -12,12 +12,18 @@ def test_ensure_runtime_scaffold_creates_runtime_files(tmp_path) -> None:
 
     project_root = tmp_path
     (project_root / "prompts").mkdir()
-    (project_root / "prompts" / "alice.md").write_text("# prompt template\n", encoding="utf-8")
+    (project_root / "prompts" / "01_identity.xml").write_text("<identity>Identity</identity>\n", encoding="utf-8")
+    (project_root / "prompts" / "02_principles.xml").write_text(
+        "<principles>Principles</principles>\n", encoding="utf-8"
+    )
+    (project_root / "prompts" / "03_memory.xml").write_text("<memory>Memory</memory>\n", encoding="utf-8")
+    (project_root / "prompts" / "04_tools.xml").write_text("<tools>Tools</tools>\n", encoding="utf-8")
+    (project_root / "prompts" / "05_output.xml").write_text("<output>Output</output>\n", encoding="utf-8")
 
     bootstrap.ensure_runtime_scaffold(project_root=project_root)
 
     config_path = project_root / ".alice" / "config.json"
-    prompt_path = project_root / ".alice" / "prompt.md"
+    prompt_path = project_root / ".alice" / "prompt.xml"
     working_memory_path = project_root / ".alice" / "memory" / "working_memory.md"
     stm_path = project_root / ".alice" / "memory" / "short_term_memory.md"
     ltm_path = project_root / ".alice" / "memory" / "alice_memory.md"
@@ -25,7 +31,15 @@ def test_ensure_runtime_scaffold_creates_runtime_files(tmp_path) -> None:
 
     assert config_path.exists()
     assert json.loads(config_path.read_text(encoding="utf-8"))["memory"]["todo_path"] == ".alice/memory/todo.md"
-    assert prompt_path.read_text(encoding="utf-8") == "# prompt template\n"
+    assert prompt_path.read_text(encoding="utf-8") == (
+        "<system_prompt>\n"
+        "<identity>Identity</identity>\n"
+        "<principles>Principles</principles>\n"
+        "<memory>Memory</memory>\n"
+        "<tools>Tools</tools>\n"
+        "<output>Output</output>\n"
+        "</system_prompt>\n"
+    )
     assert working_memory_path.read_text(encoding="utf-8") == "# Alice 的即时对话背景 (Working Memory)\n\n"
     assert stm_path.read_text(encoding="utf-8") == "# Alice 的短期记忆 (最近 7 天)\n\n"
     assert ltm_path.read_text(encoding="utf-8") == "# Alice 的长期记忆\n"
@@ -37,13 +51,19 @@ def test_ensure_runtime_scaffold_does_not_overwrite_existing_files(tmp_path) -> 
 
     project_root = tmp_path
     (project_root / "prompts").mkdir()
-    (project_root / "prompts" / "alice.md").write_text("# prompt template\n", encoding="utf-8")
+    (project_root / "prompts" / "01_identity.xml").write_text("<identity>Identity</identity>\n", encoding="utf-8")
+    (project_root / "prompts" / "02_principles.xml").write_text(
+        "<principles>Principles</principles>\n", encoding="utf-8"
+    )
+    (project_root / "prompts" / "03_memory.xml").write_text("<memory>Memory</memory>\n", encoding="utf-8")
+    (project_root / "prompts" / "04_tools.xml").write_text("<tools>Tools</tools>\n", encoding="utf-8")
+    (project_root / "prompts" / "05_output.xml").write_text("<output>Output</output>\n", encoding="utf-8")
     runtime_dir = project_root / ".alice"
     memory_dir = runtime_dir / "memory"
     memory_dir.mkdir(parents=True)
 
     (runtime_dir / "config.json").write_text('{"memory":{"todo_path":"custom/todo.md"}}\n', encoding="utf-8")
-    (runtime_dir / "prompt.md").write_text("custom prompt\n", encoding="utf-8")
+    (runtime_dir / "prompt.xml").write_text("<system_prompt>custom prompt</system_prompt>\n", encoding="utf-8")
     (memory_dir / "working_memory.md").write_text("custom working\n", encoding="utf-8")
     (memory_dir / "short_term_memory.md").write_text("custom stm\n", encoding="utf-8")
     (memory_dir / "alice_memory.md").write_text("custom ltm\n", encoding="utf-8")
@@ -52,7 +72,7 @@ def test_ensure_runtime_scaffold_does_not_overwrite_existing_files(tmp_path) -> 
     bootstrap.ensure_runtime_scaffold(project_root=project_root)
 
     assert (runtime_dir / "config.json").read_text(encoding="utf-8") == '{"memory":{"todo_path":"custom/todo.md"}}\n'
-    assert (runtime_dir / "prompt.md").read_text(encoding="utf-8") == "custom prompt\n"
+    assert (runtime_dir / "prompt.xml").read_text(encoding="utf-8") == "<system_prompt>custom prompt</system_prompt>\n"
     assert (memory_dir / "working_memory.md").read_text(encoding="utf-8") == "custom working\n"
     assert (memory_dir / "short_term_memory.md").read_text(encoding="utf-8") == "custom stm\n"
     assert (memory_dir / "alice_memory.md").read_text(encoding="utf-8") == "custom ltm\n"
@@ -71,7 +91,7 @@ def test_create_agent_from_env_ignores_request_header_profiles_env(monkeypatch) 
             request_header_profiles=[{"X-Base": "1"}],
         ),
         workflow=WorkflowConfig(max_iterations=23, max_history=81),
-        memory=MemoryConfig(prompt_path=".alice/prompt.md"),
+        memory=MemoryConfig(prompt_path=".alice/prompt.xml"),
         harness=HarnessConfig(name="docker", skill_source_name="default"),
     )
 
@@ -154,7 +174,7 @@ def test_create_agent_from_env_builds_workflow_from_settings(monkeypatch) -> Non
             supports_tool_calling=False,
         ),
         workflow=WorkflowConfig(max_iterations=23, max_history=81),
-        memory=MemoryConfig(prompt_path=".alice/prompt.md"),
+        memory=MemoryConfig(prompt_path=".alice/prompt.xml"),
         harness=HarnessConfig(name="docker", skill_source_name="default"),
     )
 

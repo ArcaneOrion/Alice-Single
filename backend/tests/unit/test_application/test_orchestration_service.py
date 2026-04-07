@@ -20,7 +20,7 @@ def test_create_from_settings_forwards_runtime_config() -> None:
         ),
         workflow=WorkflowConfig(max_history=77),
         memory=MemoryConfig(
-            prompt_path=".alice/prompt.md",
+            prompt_path=".alice/prompt.xml",
             working_memory_path=".alice/memory/working_memory.md",
             stm_path=".alice/memory/short_term_memory.md",
             ltm_path=".alice/memory/alice_memory.md",
@@ -46,7 +46,7 @@ def test_create_from_settings_forwards_runtime_config() -> None:
         "base_url": "https://example.com/v1",
         "model_name": "gpt-4.1",
         "project_root": Path("/tmp/alice-project"),
-        "prompt_path": ".alice/prompt.md",
+        "prompt_path": ".alice/prompt.xml",
         "working_memory_path": ".alice/memory/working_memory.md",
         "stm_path": ".alice/memory/short_term_memory.md",
         "ltm_path": ".alice/memory/alice_memory.md",

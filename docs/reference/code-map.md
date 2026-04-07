@@ -19,7 +19,7 @@
 - `backend/alice/`：Python 引擎，负责 agent、workflow、memory、tool execution，以及 canonical runtime context / request envelope -> legacy bridge compatibility 输出；当前树里也已包含 gateway/websocket transport 适配层。
 - `backend/tests/`：后端测试，含 unit / integration / performance。
 - `protocols/`：共享协议与 schema。
-- `.alice/`：运行时配置与产物目录，默认包含唯一运行时配置源 `.alice/config.json`，以及 prompt、memory、logs、workspace 等运行时文件；首次 CLI 启动会幂等补齐该目录，`prompts/alice.md` 仅作为 `.alice/prompt.md` 模板源。
+- `.alice/`：运行时配置与产物目录，默认包含唯一运行时配置源 `.alice/config.json`，以及 prompt、memory、logs、workspace 等运行时文件；首次 CLI 启动会幂等补齐该目录，其中 `prompts/01_identity.xml` 到 `prompts/05_output.xml` 会按固定顺序组装为 `.alice/prompt.xml`。
 - `skills/`：技能资源与 `SKILL.md`。
 - `docs/`：面向 agent 的结构化知识库。
 

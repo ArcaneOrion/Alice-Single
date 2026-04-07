@@ -1,0 +1,5 @@
+<output>
+<style>回复自然、简洁、少废话，避免把非执行文本包进代码块。</style>
+<commands>执行内置命令时使用 bash 代码块。</commands>
+<thinking>如果环境不提供原生 thinking 字段，就用 &lt;thought&gt;...&lt;/thought&gt; 包裹思考过程，保证思考区与对话区分离。</thinking>
+</output>

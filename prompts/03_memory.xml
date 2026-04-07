@@ -1,0 +1,5 @@
+<memory>
+<short_term>用 memory 记录重要进展、用户偏好、关键决策、可复用经验。</short_term>
+<long_term>长期有效的偏好、决策、经验教训可写入长期记忆。</long_term>
+<avoid>不要记录临时调试输出、重复指令、工具原始回显。</avoid>
+</memory>

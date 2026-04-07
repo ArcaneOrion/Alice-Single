@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import shutil
 from pathlib import Path
 
 from backend.alice.application.agent import AliceAgent
@@ -22,6 +21,27 @@ _RUNTIME_MEMORY_FILES = {
     ".alice/memory/alice_memory.md": "# Alice 的长期记忆\n",
     ".alice/memory/todo.md": "# Alice 的任务清单\n\n",
 }
+
+_SYSTEM_PROMPT_LAYER_FILES = [
+    "01_identity.xml",
+    "02_principles.xml",
+    "03_memory.xml",
+    "04_tools.xml",
+    "05_output.xml",
+]
+
+
+def compose_system_prompt(*, project_root: Path) -> str:
+    """按固定顺序组装 XML 系统提示词。"""
+    prompts_dir = project_root / "prompts"
+    fragments: list[str] = []
+
+    for filename in _SYSTEM_PROMPT_LAYER_FILES:
+        fragment_path = prompts_dir / filename
+        fragments.append(fragment_path.read_text(encoding="utf-8").strip())
+
+    joined_fragments = "\n".join(fragments)
+    return f"<system_prompt>\n{joined_fragments}\n</system_prompt>\n"
 
 
 def parse_request_header_profiles(profiles_str: str) -> list[dict]:
@@ -56,9 +76,9 @@ def ensure_runtime_scaffold(*, project_root: Path) -> None:
             encoding="utf-8",
         )
 
-    prompt_path = runtime_dir / "prompt.md"
+    prompt_path = runtime_dir / "prompt.xml"
     if not prompt_path.exists():
-        shutil.copyfile(project_root / "prompts" / "alice.md", prompt_path)
+        prompt_path.write_text(compose_system_prompt(project_root=project_root), encoding="utf-8")
 
     for relative_path, default_content in _RUNTIME_MEMORY_FILES.items():
         target_path = project_root / relative_path
