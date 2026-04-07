@@ -169,7 +169,7 @@ Alice 采用 **五层分层架构** + **Rust TUI 前端**：
 ├── prompts/                       # 系统提示词
 ├── memory/                        # 记忆存储
 ├── skills/                        # 技能库
-└── alice_output/                  # 输出目录
+└── .alice/workspace/              # 运行时输出目录
 ```
 
 ---

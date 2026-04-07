@@ -138,7 +138,7 @@ python skills/playwright_browser/download_images.py https://example.com --output
 \`\`\`
 
 参数说明：
-- `--output-dir`: 输出目录（相对于 alice_output/），默认为 "images"
+- `--output-dir`: 输出目录（宿主机侧映射到 `.alice/workspace/`，容器内仍使用 `alice_output/`），默认为 "images"
 - `--max`: 最大下载数量，默认为 20
 
 示例：
@@ -153,7 +153,7 @@ python skills/playwright_browser/download_images.py https://www.nvidia.cn --outp
 - **视口设置**: 默认 1280x800 (可根据需要调整)
 - **容器优化**: 自动添加 `--no-sandbox` 和 `--disable-setuid-sandbox` 参数
 - **异步执行**: 使用 asyncio 实现高效并发
-- **输出目录**: 所有文件默认保存至 `alice_output/`
+- **输出目录**: 宿主机默认保存到 `.alice/workspace/`，容器内兼容路径仍为 `alice_output/`
 
 ## 支持的操作类型 (automator.py)
 

@@ -36,7 +36,7 @@
 - `prompts/`: 提示词与人格资产。
 - `skills/`: 内置技能与相关资源。
 - `docs/`: 结构化文档知识库。
-- `.alice/`、`memory/`、`alice_output/`、`*.log`、缓存、coverage、build 产物：本地运行数据，不是 source of truth。
+- `.alice/`、`memory/`、`.alice/workspace/`、`*.log`、缓存、coverage、build 产物：本地运行数据，不是 source of truth。
 
 ## 5. 模块边界
 后端保持既有分层，不要跨层偷连：

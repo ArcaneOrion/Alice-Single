@@ -291,7 +291,7 @@ cleanup(*, remove: bool = False, force: bool = False) -> bool
 
 #### 问题 3：容器创建参数不一致，尤其是挂载 contract 不一致
 
-- `DockerConfig.default_mounts` 明确定义应挂载 `skills/` 与 `alice_output/`（`backend/alice/infrastructure/docker/config.py:80-100`）。
+- `DockerConfig.default_mounts` 明确定义应挂载 `skills/` 与宿主机 `.alice/workspace/`（容器内仍映射到 `/app/alice_output`）（`backend/alice/infrastructure/docker/config.py:80-100`）。
 - `LifecycleService._create_and_start_container()` 会遍历 `default_mounts` 添加 `-v`（`backend/alice/application/services/lifecycle_service.py:400-420`）。
 - `ContainerManager` 最终通过 `DockerClient.run_container()` 也会带上这些挂载（`backend/alice/infrastructure/docker/client.py:309-324`）。
 - `DockerExecutor._ensure_container_running()` 自建容器时完全没有挂载逻辑（`backend/alice/domain/execution/executors/docker_executor.py:472-493`）。

@@ -71,7 +71,7 @@
 
 - `.alice/`
 - `memory/`
-- `alice_output/`
+- `.alice/workspace/`
 - `*.log`
 - `.pytest_cache/`
 - `.mypy_cache/`

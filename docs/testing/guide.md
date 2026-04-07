@@ -41,7 +41,11 @@ cd frontend && cargo fmt --check
 
 当你改的是 `.alice/config.json`、`Settings`、`ConfigLoader`、`bootstrap.py`、`OrchestrationService` 配置透传或 prompt 路径解析时，优先跑这组最小回归。
 
-本组回归默认守住一个前提：**`.alice/config.json` 是唯一运行时配置源**。修改后应确认模型、header profiles、memory/logging 路径等行为**不会再被环境变量覆盖**。
+本组回归默认守住两个前提：
+- **`.alice/config.json` 是唯一运行时配置源**。
+- **CLI 启动会在首次 `load_config()` 前幂等补齐 `.alice/` 运行时目录**，最小包含 `.alice/config.json`、`.alice/prompt.md`、`.alice/memory/*`；其中 `prompts/alice.md` 是模板源，运行时只读写 `.alice/prompt.md`。
+
+修改后应确认模型、header profiles、memory/logging 路径等行为**不会再被环境变量覆盖**，且二次启动**不会覆盖用户已存在的运行时文件**。
 
 ```bash
 python -m pytest backend/tests/unit/test_core/test_config_loader.py

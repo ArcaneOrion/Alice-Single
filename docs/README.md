@@ -115,5 +115,5 @@ exec/
 - `docs/` 是知识沉淀区。
 - `docs/reference/*` 是代码地图的权威来源。
 - `AGENTS.md` 只保留最小地图和操作约束。
-- `.alice/`、`memory/`、`alice_output/`、日志、缓存、coverage、build 产物是运行时数据，不是设计文档。
+- `.alice/`、`memory/`、`.alice/workspace/`、日志、缓存、coverage、build 产物是运行时数据，不是设计文档。
 - 代码改动如果引入新的长期知识，应优先补到 `docs/` 对应专题。
