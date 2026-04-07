@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -150,6 +151,22 @@ class ConfigLoader:
             return os.getenv(var_name, match.group(0))
 
         return re.sub(r"\$\{([^}]+)\}", replace_env_var, value)
+
+
+def build_default_config_data(config_path: str | None = None) -> dict[str, Any]:
+    """构建默认运行时配置的 JSON 数据。"""
+    loader = ConfigLoader(config_path)
+    settings = loader._default_settings(loader._resolve_config_path())
+    return {
+        "llm": asdict(settings.llm),
+        "workflow": asdict(settings.workflow),
+        "memory": asdict(settings.memory),
+        "harness": asdict(settings.harness),
+        "docker": asdict(settings.docker),
+        "logging": asdict(settings.logging),
+        "skills_dir": settings.skills_dir,
+        "output_dir": settings.output_dir,
+    }
 
 
 def load_config(config_path: str | None = None) -> Settings:

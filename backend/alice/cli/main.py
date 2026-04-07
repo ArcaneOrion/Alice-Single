@@ -31,7 +31,11 @@ def _prepare_process_environment() -> None:
 
 from backend.alice.application.agent import AliceAgent
 from backend.alice.application.dto import response_to_dict
-from backend.alice.cli.bootstrap import configure_runtime_logging, create_agent_from_env
+from backend.alice.cli.bootstrap import (
+    configure_runtime_logging,
+    create_agent_from_env,
+    ensure_runtime_scaffold,
+)
 from backend.alice.infrastructure.bridge.legacy_compatibility_serializer import (
     serialize_error_message,
     serialize_status_message,
@@ -78,6 +82,7 @@ class TUIBridge:
     def initialize(self) -> bool:
         """初始化 Agent"""
         try:
+            ensure_runtime_scaffold(project_root=project_root)
             configure_runtime_logging(console_level="ERROR")
             self.agent = create_agent_from_env(project_root=project_root)
             logger.info("Alice Agent 初始化成功")

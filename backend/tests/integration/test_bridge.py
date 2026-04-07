@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+import backend.alice.cli.main as cli_main
 from backend.alice.application.dto.responses import (
     ContentResponse,
     DoneResponse,
@@ -694,6 +695,35 @@ class TestDualEntryParity:
             serialize_status_message("streaming"),
             serialize_error_message(content="boom", code="E1"),
         ]
+
+
+def test_tui_bridge_initialize_bootstraps_runtime_before_logging_and_agent(monkeypatch):
+    calls: list[tuple[str, Path | str]] = []
+    fake_project_root = Path("/tmp/alice-portable-root")
+
+    def fake_ensure_runtime_scaffold(*, project_root):
+        calls.append(("ensure", project_root))
+
+    def fake_configure_runtime_logging(*, console_level):
+        calls.append(("logging", console_level))
+
+    def fake_create_agent_from_env(*, project_root):
+        calls.append(("agent", project_root))
+        return MagicMock()
+
+    monkeypatch.setattr("backend.alice.cli.main.ensure_runtime_scaffold", fake_ensure_runtime_scaffold)
+    monkeypatch.setattr("backend.alice.cli.main.configure_runtime_logging", fake_configure_runtime_logging)
+    monkeypatch.setattr("backend.alice.cli.main.create_agent_from_env", fake_create_agent_from_env)
+    monkeypatch.setattr(cli_main, "project_root", fake_project_root)
+
+    bridge = TUIBridge()
+
+    assert bridge.initialize() is True
+    assert calls == [
+        ("ensure", fake_project_root),
+        ("logging", "ERROR"),
+        ("agent", fake_project_root),
+    ]
 
 
 class TestDualEntrySuccessPathParity:

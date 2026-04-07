@@ -1,9 +1,62 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 from backend.alice.core.config.settings import HarnessConfig, LLMConfig, MemoryConfig, Settings, WorkflowConfig
 from backend.alice.domain.llm.providers.base import ProviderCapability
+
+
+def test_ensure_runtime_scaffold_creates_runtime_files(tmp_path) -> None:
+    from backend.alice.cli import bootstrap
+
+    project_root = tmp_path
+    (project_root / "prompts").mkdir()
+    (project_root / "prompts" / "alice.md").write_text("# prompt template\n", encoding="utf-8")
+
+    bootstrap.ensure_runtime_scaffold(project_root=project_root)
+
+    config_path = project_root / ".alice" / "config.json"
+    prompt_path = project_root / ".alice" / "prompt.md"
+    working_memory_path = project_root / ".alice" / "memory" / "working_memory.md"
+    stm_path = project_root / ".alice" / "memory" / "short_term_memory.md"
+    ltm_path = project_root / ".alice" / "memory" / "alice_memory.md"
+    todo_path = project_root / ".alice" / "memory" / "todo.md"
+
+    assert config_path.exists()
+    assert json.loads(config_path.read_text(encoding="utf-8"))["memory"]["todo_path"] == ".alice/memory/todo.md"
+    assert prompt_path.read_text(encoding="utf-8") == "# prompt template\n"
+    assert working_memory_path.read_text(encoding="utf-8") == "# Alice 的即时对话背景 (Working Memory)\n\n"
+    assert stm_path.read_text(encoding="utf-8") == "# Alice 的短期记忆 (最近 7 天)\n\n"
+    assert ltm_path.read_text(encoding="utf-8") == "# Alice 的长期记忆\n"
+    assert todo_path.read_text(encoding="utf-8") == "# Alice 的任务清单\n\n"
+
+
+def test_ensure_runtime_scaffold_does_not_overwrite_existing_files(tmp_path) -> None:
+    from backend.alice.cli import bootstrap
+
+    project_root = tmp_path
+    (project_root / "prompts").mkdir()
+    (project_root / "prompts" / "alice.md").write_text("# prompt template\n", encoding="utf-8")
+    runtime_dir = project_root / ".alice"
+    memory_dir = runtime_dir / "memory"
+    memory_dir.mkdir(parents=True)
+
+    (runtime_dir / "config.json").write_text('{"memory":{"todo_path":"custom/todo.md"}}\n', encoding="utf-8")
+    (runtime_dir / "prompt.md").write_text("custom prompt\n", encoding="utf-8")
+    (memory_dir / "working_memory.md").write_text("custom working\n", encoding="utf-8")
+    (memory_dir / "short_term_memory.md").write_text("custom stm\n", encoding="utf-8")
+    (memory_dir / "alice_memory.md").write_text("custom ltm\n", encoding="utf-8")
+    (memory_dir / "todo.md").write_text("custom todo\n", encoding="utf-8")
+
+    bootstrap.ensure_runtime_scaffold(project_root=project_root)
+
+    assert (runtime_dir / "config.json").read_text(encoding="utf-8") == '{"memory":{"todo_path":"custom/todo.md"}}\n'
+    assert (runtime_dir / "prompt.md").read_text(encoding="utf-8") == "custom prompt\n"
+    assert (memory_dir / "working_memory.md").read_text(encoding="utf-8") == "custom working\n"
+    assert (memory_dir / "short_term_memory.md").read_text(encoding="utf-8") == "custom stm\n"
+    assert (memory_dir / "alice_memory.md").read_text(encoding="utf-8") == "custom ltm\n"
+    assert (memory_dir / "todo.md").read_text(encoding="utf-8") == "custom todo\n"
 
 
 def test_create_agent_from_env_ignores_request_header_profiles_env(monkeypatch) -> None:

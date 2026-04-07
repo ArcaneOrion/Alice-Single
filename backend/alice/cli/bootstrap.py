@@ -2,17 +2,26 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 from pathlib import Path
 
 from backend.alice.application.agent import AliceAgent
 from backend.alice.application.services import LifecycleService, OrchestrationService
 from backend.alice.application.workflow import ChatWorkflow, WorkflowChain
-from backend.alice.core.config.loader import load_config
+from backend.alice.core.config.loader import build_default_config_data, load_config
 from backend.alice.core.logging import configure_logging
 from backend.alice.core.registry import get_llm_registry
 from backend.alice.domain.llm.providers.base import ProviderCapability
+from backend.alice.domain.memory.stores.working_store import WorkingMemoryStore
 
 logger = logging.getLogger(__name__)
+
+_RUNTIME_MEMORY_FILES = {
+    ".alice/memory/working_memory.md": "# Alice 的即时对话背景 (Working Memory)\n\n",
+    ".alice/memory/short_term_memory.md": "# Alice 的短期记忆 (最近 7 天)\n\n",
+    ".alice/memory/alice_memory.md": "# Alice 的长期记忆\n",
+    ".alice/memory/todo.md": "# Alice 的任务清单\n\n",
+}
 
 
 def parse_request_header_profiles(profiles_str: str) -> list[dict]:
@@ -33,6 +42,34 @@ def parse_request_header_profiles(profiles_str: str) -> list[dict]:
     return parsed
 
 
+def ensure_runtime_scaffold(*, project_root: Path) -> None:
+    """确保 .alice 运行时目录与最小脚手架存在。"""
+    runtime_dir = project_root / ".alice"
+    memory_dir = runtime_dir / "memory"
+    runtime_dir.mkdir(exist_ok=True)
+    memory_dir.mkdir(parents=True, exist_ok=True)
+
+    config_path = runtime_dir / "config.json"
+    if not config_path.exists():
+        config_path.write_text(
+            json.dumps(build_default_config_data(str(config_path)), ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+    prompt_path = runtime_dir / "prompt.md"
+    if not prompt_path.exists():
+        shutil.copyfile(project_root / "prompts" / "alice.md", prompt_path)
+
+    for relative_path, default_content in _RUNTIME_MEMORY_FILES.items():
+        target_path = project_root / relative_path
+        if target_path.exists():
+            continue
+        if relative_path.endswith("working_memory.md"):
+            WorkingMemoryStore(str(target_path)).clear()
+            continue
+        target_path.write_text(default_content, encoding="utf-8")
+
+
 def configure_runtime_logging(*, console_level: str = "ERROR") -> None:
     """初始化后端日志配置。"""
     from dotenv import load_dotenv
@@ -41,6 +78,7 @@ def configure_runtime_logging(*, console_level: str = "ERROR") -> None:
     settings = load_config()
     settings.logging.console_level = console_level
     configure_logging(settings.logging)
+
 
 
 def create_agent_from_env(
@@ -104,5 +142,6 @@ def create_agent_from_env(
 __all__ = [
     "configure_runtime_logging",
     "create_agent_from_env",
+    "ensure_runtime_scaffold",
     "parse_request_header_profiles",
 ]
