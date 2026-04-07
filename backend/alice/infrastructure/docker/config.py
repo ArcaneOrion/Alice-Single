@@ -84,7 +84,7 @@ class DockerConfig:
         仅同步技能库和输出目录，隔离记忆、人设及源代码。
         """
         skills_path = self.project_root / "skills"
-        output_path = self.project_root / "alice_output"
+        output_path = self.project_root / ".alice" / "workspace"
 
         return [
             MountConfig(

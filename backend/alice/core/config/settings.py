@@ -84,7 +84,7 @@ class DockerConfig:
     mounts: dict[str, str] = field(
         default_factory=lambda: {
             "skills": "/app/skills",
-            ".alice/output": "/app/alice_output",
+            ".alice/workspace": "/app/alice_output",
         }
     )
     timeout: int = 120
@@ -152,7 +152,7 @@ class Settings:
     project_root: Path = field(default_factory=lambda: Path.cwd())
     config_path: str = ".alice/config.json"
     skills_dir: str = "skills"
-    output_dir: str = ".alice/output"
+    output_dir: str = ".alice/workspace"
 
     @property
     def prompt_path(self) -> str:

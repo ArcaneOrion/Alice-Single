@@ -36,7 +36,7 @@ class TodoCommandHandler:
                 f.write(content.strip())
 
             logger.info(f"已更新任务清单文件: {target_path}")
-            return "已成功更新宿主机任务清单 (memory/todo.md)。"
+            return "已成功更新宿主机任务清单 (.alice/memory/todo.md)。"
 
         except Exception as e:
             logger.error(f"更新任务清单失败: {e}")

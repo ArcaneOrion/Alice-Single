@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from backend.alice.core.config.loader import ConfigLoader
+from backend.alice.core.config.loader import ConfigLoader, build_default_config_data
 
 
 class TestConfigLoader(unittest.TestCase):
@@ -83,7 +83,19 @@ class TestConfigLoader(unittest.TestCase):
         self.assertEqual(settings.memory.ltm_path, ".alice/memory/alice_memory.md")
         self.assertEqual(settings.memory.todo_path, ".alice/memory/todo.md")
         self.assertEqual(settings.logging.logs_dir, ".alice/logs")
-        self.assertEqual(settings.output_dir, ".alice/output")
+        self.assertEqual(settings.output_dir, ".alice/workspace")
+
+    def test_build_default_config_data_uses_runtime_defaults(self) -> None:
+        """默认配置序列化应保留 .alice 运行时路径约定。"""
+        config_data = build_default_config_data("/tmp/example/.alice/config.json")
+
+        self.assertEqual(config_data["memory"]["prompt_path"], ".alice/prompt.md")
+        self.assertEqual(config_data["memory"]["working_memory_path"], ".alice/memory/working_memory.md")
+        self.assertEqual(config_data["memory"]["stm_path"], ".alice/memory/short_term_memory.md")
+        self.assertEqual(config_data["memory"]["ltm_path"], ".alice/memory/alice_memory.md")
+        self.assertEqual(config_data["memory"]["todo_path"], ".alice/memory/todo.md")
+        self.assertEqual(config_data["logging"]["logs_dir"], ".alice/logs")
+        self.assertEqual(config_data["output_dir"], ".alice/workspace")
 
     def test_json_config_is_not_overridden_by_env(self) -> None:
         """运行时配置应只来自 JSON，不应再被环境变量覆盖。"""
@@ -131,4 +143,3 @@ class TestConfigLoader(unittest.TestCase):
         self.assertEqual(settings.memory.max_rounds, 20)
         self.assertEqual(settings.logging.level, "INFO")
         self.assertEqual(settings.logging.logs_dir, ".alice/logs")
-
