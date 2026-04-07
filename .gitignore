@@ -3,6 +3,7 @@
 __pycache__/
 *.py[cod]
 alice_output/
+.alice/workspace/
 tmp/
 # UI related
 alice-ui/node_modules/
