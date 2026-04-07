@@ -210,6 +210,8 @@ def test_tool_registry_snapshot_exposes_four_categories_and_openai_tools() -> No
     assert any(tool["tool_id"] == "skill:demo" for tool in snapshot["skills"])
     assert snapshot["terminal_commands"][0]["tool_id"] == "run_bash"
     assert snapshot["code_execution"][0]["tool_id"] == "run_python"
+    assert registry.list_tools()[0].metadata["execution_environment"] == "container"
+    assert registry.list_tools()[1].metadata["execution_environment"] == "container"
 
     openai_tools = registry.list_openai_tools()
     assert [tool["function"]["name"] for tool in openai_tools] == ["run_bash", "run_python"]
@@ -243,6 +245,13 @@ def test_execution_service_uses_tool_registry_schema_validation() -> None:
         service.execute_tool_call(invocation)
 
     executor.execute.assert_not_called()
+
+
+@pytest.mark.unit
+def test_execution_service_defaults_to_local_process_executor() -> None:
+    service = ExecutionService()
+
+    assert service.executor.__class__.__name__ == "LocalProcessExecutor"
 
 
 @pytest.mark.unit

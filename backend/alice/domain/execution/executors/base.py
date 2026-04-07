@@ -61,7 +61,12 @@ class CommandExecutor(Protocol):
     """命令执行器接口协议"""
 
     @abstractmethod
-    def execute(self, command: str, is_python_code: bool = False) -> ExecutionResult:
+    def execute(
+        self,
+        command: str,
+        is_python_code: bool = False,
+        log_context: dict[str, Any] | None = None,
+    ) -> ExecutionResult:
         """执行命令"""
         ...
 
@@ -96,8 +101,14 @@ class BaseExecutor(ABC):
         """实际执行命令的抽象方法"""
         ...
 
-    def execute(self, command: str, is_python_code: bool = False) -> ExecutionResult:
+    def execute(
+        self,
+        command: str,
+        is_python_code: bool = False,
+        log_context: dict[str, Any] | None = None,
+    ) -> ExecutionResult:
         """执行命令"""
+        del log_context
         if self._interrupted:
             self._interrupted = False
             return ExecutionResult.error_result(

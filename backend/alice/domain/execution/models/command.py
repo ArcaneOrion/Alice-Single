@@ -20,6 +20,7 @@ class CommandType(Enum):
 class ExecutionEnvironment(Enum):
     """执行环境枚举"""
     HOST = "host"           # 宿主机执行
+    CONTAINER = "container" # 当前容器内本地执行
     DOCKER = "docker"       # Docker 容器执行
     SANDBOX = "sandbox"     # 沙盒执行
 
@@ -30,7 +31,7 @@ class Command:
 
     raw: str  # 原始命令字符串
     type: CommandType = field(default=CommandType.UNKNOWN)
-    environment: ExecutionEnvironment = field(default=ExecutionEnvironment.DOCKER)
+    environment: ExecutionEnvironment = field(default=ExecutionEnvironment.CONTAINER)
     working_dir: Optional[str] = field(default="/app")
     timeout: int = field(default=120)
 

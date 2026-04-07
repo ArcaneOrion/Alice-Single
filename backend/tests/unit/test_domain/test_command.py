@@ -26,7 +26,7 @@ class TestCommand:
 
         assert cmd.raw == "echo hello"
         assert cmd.type == CommandType.BASH
-        assert cmd.environment == ExecutionEnvironment.DOCKER
+        assert cmd.environment == ExecutionEnvironment.CONTAINER
         assert cmd.working_dir == "/app"
         assert cmd.timeout == 120
 
@@ -162,13 +162,14 @@ class TestExecutionEnvironment:
     def test_enum_values(self):
         """测试枚举值"""
         assert ExecutionEnvironment.HOST.value == "host"
+        assert ExecutionEnvironment.CONTAINER.value == "container"
         assert ExecutionEnvironment.DOCKER.value == "docker"
         assert ExecutionEnvironment.SANDBOX.value == "sandbox"
 
     def test_enum_comparison(self):
         """测试枚举比较"""
-        assert ExecutionEnvironment.DOCKER == ExecutionEnvironment.DOCKER
-        assert ExecutionEnvironment.HOST != ExecutionEnvironment.DOCKER
+        assert ExecutionEnvironment.CONTAINER == ExecutionEnvironment.CONTAINER
+        assert ExecutionEnvironment.HOST != ExecutionEnvironment.CONTAINER
 
 
 # ============================================================================
@@ -201,14 +202,12 @@ class TestCommandParsing:
         assert cmd1.type == cmd2.type
 
     def test_case_sensitivity_in_builtin_detection(self):
-        """测试内置命令检测大小写敏感"""
+        """测试内置命令检测大小写不敏感"""
         cmd_lowercase = Command(raw="toolkit list")
         cmd_uppercase = Command(raw="TOOLKIT list")
 
-        # 小写应该是 builtin
         assert cmd_lowercase.type == CommandType.BUILTIN
-        # 大写可能不会被识别为 builtin
-        assert cmd_uppercase.type != CommandType.BUILTIN or cmd_uppercase.type == CommandType.BASH
+        assert cmd_uppercase.type == CommandType.BUILTIN
 
 
 # ============================================================================

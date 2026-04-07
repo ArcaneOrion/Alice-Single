@@ -79,7 +79,7 @@ class CommandRegistry(ABC):
         ...
 
     @abstractmethod
-    def create_harness(self, name: str = "docker", **kwargs: Any) -> HarnessBundle:
+    def create_harness(self, name: str = "container", **kwargs: Any) -> HarnessBundle:
         """创建 execution harness。"""
         ...
 
@@ -91,6 +91,10 @@ def _create_docker_harness(*, project_root: Path, **_kwargs: Any) -> HarnessBund
     return HarnessBundle(backend=backend, executor=executor)
 
 
+def _create_container_harness(*, project_root: Path, **_kwargs: Any) -> HarnessBundle:
+    return _create_docker_harness(project_root=project_root)
+
+
 class InMemoryCommandRegistry(CommandRegistry):
     """内存命令注册表实现"""
 
@@ -99,9 +103,16 @@ class InMemoryCommandRegistry(CommandRegistry):
         self._harnesses: Dict[str, HarnessSpec] = {}
         self.register_harness(
             HarnessSpec(
+                name="container",
+                factory=_create_container_harness,
+                description="默认 runtime 容器 execution harness",
+            )
+        )
+        self.register_harness(
+            HarnessSpec(
                 name="docker",
                 factory=_create_docker_harness,
-                description="默认 Docker execution harness",
+                description="兼容 Docker execution harness",
             )
         )
 
@@ -144,7 +155,7 @@ class InMemoryCommandRegistry(CommandRegistry):
         """获取 execution harness。"""
         return self._harnesses.get(name)
 
-    def create_harness(self, name: str = "docker", **kwargs: Any) -> HarnessBundle:
+    def create_harness(self, name: str = "container", **kwargs: Any) -> HarnessBundle:
         """创建 execution harness。"""
         spec = self.get_harness(name)
         if spec is None:
@@ -161,9 +172,16 @@ class InMemoryCommandRegistry(CommandRegistry):
         self._harnesses.clear()
         self.register_harness(
             HarnessSpec(
+                name="container",
+                factory=_create_container_harness,
+                description="默认 runtime 容器 execution harness",
+            )
+        )
+        self.register_harness(
+            HarnessSpec(
                 name="docker",
                 factory=_create_docker_harness,
-                description="默认 Docker execution harness",
+                description="兼容 Docker execution harness",
             )
         )
 

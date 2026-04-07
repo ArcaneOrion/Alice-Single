@@ -35,6 +35,9 @@ class DockerExecutor(BaseExecutor):
     在常驻 Docker 容器中执行命令，提供安全隔离环境。
     """
 
+    environment_name = ExecutionEnvironment.DOCKER.value
+    execution_phase = "docker_execute"
+
     def __init__(
         self,
         container_name: str = "alice-sandbox-instance",

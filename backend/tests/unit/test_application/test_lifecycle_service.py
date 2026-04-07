@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from backend.alice.application.services.lifecycle_service import LifecycleService
 from backend.alice.domain.execution.executors.base import ExecutionBackendStatus
@@ -105,9 +106,15 @@ def test_initialize_routes_build_progress_to_logger_instead_of_stdout(
 
     captured = capsys.readouterr()
     progress_record = next(
-        record for record in caplog.records if record.message == "Lifecycle docker build progress"
+        record for record in caplog.records if record.message == "Lifecycle runtime build progress"
     )
 
     assert captured.out == ""
-    assert "Lifecycle docker build progress" in caplog.text
+    assert "Lifecycle runtime build progress" in caplog.text
     assert progress_record.data["progress_line"] == "building layer"
+
+
+def test_lifecycle_service_defaults_to_local_process_backend(tmp_path: Path) -> None:
+    service = LifecycleService(project_root=tmp_path)
+
+    assert service.backend.__class__.__name__ == "LocalProcessExecutionBackend"

@@ -88,7 +88,12 @@ class CommandExecutor(Protocol):
     """命令执行器接口"""
 
     @abstractmethod
-    def execute(self, command: str, is_python_code: bool = False) -> ExecutionResult:
+    def execute(
+        self,
+        command: str,
+        is_python_code: bool = False,
+        log_context: dict[str, Any] | None = None,
+    ) -> ExecutionResult:
         """执行命令"""
         ...
 

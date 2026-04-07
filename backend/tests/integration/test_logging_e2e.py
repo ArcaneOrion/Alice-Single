@@ -607,8 +607,8 @@ def test_logging_e2e_captures_workflow_executor_and_api_error_events(tmp_path: P
     assert executed_log_context["task_id"] == task_id
     assert executed_log_context["session_id"] == "session-workflow"
     assert executed_log_context["component"] == "execution_service"
-    assert executed_log_context["phase"] == "docker_execute"
-    assert executed_log_context["span_id"].endswith(".iter1.tool1.docker_execute")
+    assert executed_log_context["phase"] == "container_execute"
+    assert executed_log_context["span_id"].endswith(".iter1.tool1.container_execute")
 
     for record in workflow_events + [executor_prepared, executor_result, api_error]:
         _assert_required_fields(record)

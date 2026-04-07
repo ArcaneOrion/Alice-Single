@@ -47,7 +47,7 @@ class ToolRegistry:
                     "additionalProperties": False,
                 },
                 category=ToolCategory.TERMINAL_COMMANDS,
-                metadata={"execution_environment": "docker"},
+                metadata={"execution_environment": "container"},
             ),
             ToolSchemaDefinition(
                 name="run_python",
@@ -64,7 +64,7 @@ class ToolRegistry:
                     "additionalProperties": False,
                 },
                 category=ToolCategory.CODE_EXECUTION,
-                metadata={"execution_environment": "docker"},
+                metadata={"execution_environment": "container"},
             ),
         ]
 

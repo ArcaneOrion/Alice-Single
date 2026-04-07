@@ -12,7 +12,8 @@ from typing import Callable, Optional
 
 from backend.alice.core.config import load_config
 
-from ..executors.docker_executor import DockerExecutor
+from ..executors.base import CommandExecutor
+from ..executors.local_process_executor import LocalProcessExecutor
 from ..models.execution_result import ExecutionResult, ExecutionStatus
 from ..models.tool_calling import ToolExecutionResult, ToolInvocation, ToolResultPayload
 from .tool_registry import ToolRegistry
@@ -33,15 +34,15 @@ def _command_preview(command: str, limit: int = 200) -> str:
 class _ExecutionServiceBase:
     """命令执行服务
 
-    统一的命令执行入口，处理内置命令拦截和容器执行路由
+    统一的命令执行入口，处理内置命令拦截和执行环境路由
     """
 
     def __init__(
         self,
-        executor: Optional[DockerExecutor] = None,
+        executor: Optional[CommandExecutor] = None,
         snapshot_manager=None
     ):
-        self.executor = executor or DockerExecutor()
+        self.executor = executor or LocalProcessExecutor()
         self.snapshot_manager = None
 
         # 内置命令处理器
@@ -194,17 +195,23 @@ class SkillSnapshotManager:
 class ExecutionService(_ExecutionServiceBase):
     """命令执行服务
 
-    统一的命令执行入口，处理内置命令拦截和容器执行路由
+    统一的命令执行入口，处理内置命令拦截和执行环境路由
     """
 
     def __init__(
         self,
-        executor: Optional[DockerExecutor] = None,
+        executor: Optional[CommandExecutor] = None,
         snapshot_manager=None,
         tool_registry=None,
     ):
         super().__init__(executor=executor, snapshot_manager=snapshot_manager)
         self.tool_registry = tool_registry
+
+    def _executor_environment_name(self) -> str:
+        return str(getattr(self.executor, "environment_name", "container"))
+
+    def _executor_phase_name(self) -> str:
+        return str(getattr(self.executor, "execution_phase", "container_execute"))
 
     def _build_log_context(self, log_context: Optional[dict], phase: str) -> dict:
         """构建执行链路日志上下文。"""
@@ -280,7 +287,7 @@ class ExecutionService(_ExecutionServiceBase):
         started_at = time.monotonic()
         command_preview = _command_preview(command)
         command_type = "python" if is_python_code else "bash"
-        execution_environment = "docker"
+        execution_environment = self._executor_environment_name()
 
         self._log_execution_event(
             event_type="executor.command_prepared",
@@ -366,14 +373,15 @@ class ExecutionService(_ExecutionServiceBase):
                 )
                 return cat_result
 
-        # 2. Docker 容器执行
+        # 2. 执行环境中执行命令
         try:
-            docker_log_context = self._build_log_context(log_context, phase="docker_execute")
+            execute_phase = self._executor_phase_name()
+            executor_log_context = self._build_log_context(log_context, phase=execute_phase)
             try:
                 result = self.executor.execute(
                     command,
                     is_python_code,
-                    log_context=docker_log_context,
+                    log_context=executor_log_context,
                 )
             except TypeError:
                 result = self.executor.execute(command, is_python_code)
@@ -381,7 +389,7 @@ class ExecutionService(_ExecutionServiceBase):
             self._log_execution_event(
                 event_type="executor.command_result",
                 message="Execution service failed to run command",
-                phase="docker_execute",
+                phase=self._executor_phase_name(),
                 log_context=log_context,
                 level="error",
                 with_exc_info=True,

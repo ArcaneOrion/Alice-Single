@@ -10,8 +10,10 @@ from pathlib import Path
 from uuid import uuid4
 
 from backend.alice.domain.execution.executors.base import ExecutionBackend
+from backend.alice.domain.execution.executors.local_process_executor import (
+    LocalProcessExecutionBackend,
+)
 from backend.alice.infrastructure.docker.config import DockerConfig
-from backend.alice.infrastructure.docker.container_manager import DockerExecutionBackend
 
 logger = logging.getLogger(__name__)
 
@@ -20,8 +22,8 @@ class LifecycleService:
     """生命周期服务
 
     负责：
-    - Docker 环境初始化
-    - 容器管理
+    - 执行环境初始化
+    - runtime 状态管理
     - 资源清理
     """
 
@@ -37,7 +39,7 @@ class LifecycleService:
             backend=backend,
         )
         self.project_root = self.docker_config.project_root
-        self.backend = backend or DockerExecutionBackend(self.docker_config)
+        self.backend = backend or LocalProcessExecutionBackend(work_dir=self.project_root)
         self._initialized = False
         self._container_running = False
 
@@ -105,16 +107,16 @@ class LifecycleService:
     def _log_build_progress(self, line: str) -> None:
         self._log_event(
             event_type="system.start",
-            message="Lifecycle docker build progress",
-            phase="build_docker_image",
+            message="Lifecycle runtime build progress",
+            phase="build_runtime_image",
             data={
-                "docker_image": self.docker_config.image_name,
+                "runtime_image": self.docker_config.image_name,
                 "progress_line": line,
             },
         )
 
     def initialize(self) -> None:
-        """初始化应用生命周期，确保 Docker 环境就绪。"""
+        """初始化应用生命周期，确保执行环境就绪。"""
         if self._initialized:
             logger.debug("生命周期服务已初始化")
             return
@@ -125,8 +127,8 @@ class LifecycleService:
             message="Lifecycle initialization started",
             phase="initialize",
             data={
-                "docker_image": self.docker_config.image_name,
-                "container_name": self.docker_config.container.name,
+                "runtime_image": self.docker_config.image_name,
+                "runtime_name": self.docker_config.container.name,
                 "project_root": str(self.project_root),
             },
         )
@@ -140,8 +142,8 @@ class LifecycleService:
                 message="Lifecycle initialization completed",
                 phase="initialize",
                 data={
-                    "docker_image": self.docker_config.image_name,
-                    "container_name": self.docker_config.container.name,
+                    "runtime_image": self.docker_config.image_name,
+                    "runtime_name": self.docker_config.container.name,
                     "engine_ready": status.engine_ready,
                     "image_ready": status.image_ready,
                     "container_exists": status.container_exists,
@@ -158,8 +160,8 @@ class LifecycleService:
                 phase="initialize",
                 level="error",
                 data={
-                    "docker_image": self.docker_config.image_name,
-                    "container_name": self.docker_config.container.name,
+                    "runtime_image": self.docker_config.image_name,
+                    "runtime_name": self.docker_config.container.name,
                     "timing": {
                         "duration_ms": int((time.monotonic() - init_started_at) * 1000)
                     },
