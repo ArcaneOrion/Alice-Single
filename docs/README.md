@@ -8,7 +8,7 @@
 - 先按任务类型选专题。
 - 再进入专题里的权威文档。
 - 如果发现旧的根目录历史文档入口与 `docs/` 重复，优先删除旧入口并修正到 `docs/` 下的专题文档。
-- 如果改动影响架构、协议、日志、测试入口或代码地图导航，顺手运行一次 `/code-map` 做 docs-first 同步。
+- 如果改动影响架构、协议、日志、测试入口或代码地图导航，顺手运行一次 `/code_map_team` 做 docs-first 同步。
 
 ## 按任务导航
 
@@ -60,6 +60,19 @@
 - `backend/alice/domain/llm/services/chat_service.py`
 - `backend/alice/domain/llm/services/stream_service.py`
 - `backend/alice/domain/execution/services/tool_registry.py`
+
+### 想修改运行时配置 / Harness / Prompt 组装
+- [代码地图总览](./reference/code-map.md)
+- [代码地图-结构视图](./reference/code-map-structure.md)
+- [代码地图-耦合视图](./reference/code-map-coupling.md)
+- [测试指南](./testing/guide.md)
+- `backend/alice/core/config/settings.py`
+- `backend/alice/core/config/loader.py`
+- `backend/alice/cli/bootstrap.py`
+- `backend/alice/core/registry/command_registry.py`
+- `backend/alice/application/services/lifecycle_service.py`
+- `backend/alice/domain/execution/executors/`
+- `prompts/`
 
 ### 想跑测试或补测试
 - [测试指南](./testing/guide.md)
@@ -115,5 +128,5 @@ exec/
 - `docs/` 是知识沉淀区。
 - `docs/reference/*` 是代码地图的权威来源。
 - `AGENTS.md` 只保留最小地图和操作约束。
-- `.alice/`、`memory/`、`.alice/workspace/`、日志、缓存、coverage、build 产物是运行时数据，不是设计文档。
+- `.alice/`、`.alice/workspace/`、日志、缓存、coverage、build 产物是运行时数据，不是设计文档；prompt 源分片在 `prompts/`，运行时聚合文件在 `.alice/prompt.xml`。
 - 代码改动如果引入新的长期知识，应优先补到 `docs/` 对应专题。

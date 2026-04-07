@@ -18,7 +18,7 @@
   - `frontend/src/core/dispatcher.rs`
   - `frontend/src/ui/screen.rs`
   - `frontend/src/bridge/client.rs`
-- Runtime Context、Request Envelope、Tool Registry 与工具调用编排：
+- Runtime Context、Request Envelope、Tool Registry、Execution Harness 与工具调用编排：
   - `docs/reference/code-map.md`
   - `docs/reference/code-map-structure.md`
   - `docs/reference/code-map-coupling.md`
@@ -30,6 +30,25 @@
   - `backend/alice/domain/llm/services/stream_service.py`
   - `backend/alice/domain/llm/providers/base.py`
   - `backend/alice/domain/execution/services/tool_registry.py`
+  - `backend/alice/core/registry/command_registry.py`
+  - `backend/alice/domain/execution/executors/local_process_executor.py`
+  - `backend/alice/domain/execution/executors/docker_executor.py`
+  - `backend/alice/application/services/lifecycle_service.py`
+- 运行时配置与 CLI 启动装配：
+  - `docs/testing/guide.md`
+  - `backend/alice/core/config/settings.py`
+  - `backend/alice/core/config/loader.py`
+  - `backend/alice/cli/bootstrap.py`
+  - `backend/alice/application/services/orchestration_service.py`
+- Prompt 源文件、运行时聚合与写入边界：
+  - `prompts/01_identity.xml`
+  - `prompts/02_principles.xml`
+  - `prompts/03_memory.xml`
+  - `prompts/04_tools.xml`
+  - `prompts/05_output.xml`
+  - `backend/alice/cli/bootstrap.py`
+  - `backend/alice/domain/execution/services/execution_service.py`
+  - `docs/reference/code-map-coupling.md`
 - Bridge 协议与当前默认运行边界：
   - `docs/protocols/bridge.md`
   - `protocols/bridge_schema.json`
@@ -70,8 +89,9 @@
 以下路径属于 operational data 或本地产物：
 
 - `.alice/`
-- `memory/`
 - `.alice/workspace/`
+- `.alice/logs/`
+- `.alice/memory/`
 - `*.log`
 - `.pytest_cache/`
 - `.mypy_cache/`
@@ -85,6 +105,7 @@
 使用原则：
 - 可以把它们当作调试线索。
 - 不要把它们当作架构说明或协议说明。
+- `.alice/config.json` 与 `.alice/prompt.xml` 是当前运行时真实输入边界，但它们仍属于运行时文件；长期规则、默认模板与设计语义应分别以 `backend/alice/core/config/*`、`prompts/` 与 `docs/` 为准。
 - 如果某个运行时行为值得长期保留，请把知识写进 `docs/`，不要只留在产物里。
 
 ## 文档维护策略

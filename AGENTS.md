@@ -124,6 +124,6 @@ pytest -m "not slow"
 
 ## 10. 安全与提交
 - 不要提交 `.env`、API keys、日志、memory/state 文件、缓存、coverage、构建产物。
-- 配置模板参考 `.env.example`；真实 secrets 只保存在本地 `.env`。
+- LLM 配置与 secrets 只保存在本地 `.alice/config.json`；不要提交真实凭据。
 - Commit message 使用 Conventional Commits，例如 `feat:`、`fix:`、`refactor:`、`chore:`。
 - 单次提交尽量聚焦一个 feature、一个 layer 或一个连贯 refactor。

@@ -27,6 +27,27 @@
 - `StreamManager` 已不是 `BridgeServer` 构造参数，也不是 `bridge` 包级正式导出；若修改其行为，至少联动 `backend/tests/unit/test_core/test_stream_manager.py`。
 - 如果改 legacy projection，不要只看 bridge 目录；还要同步核对 frontend bridge client / dispatcher、logging schema、bridge integration test 与 logging e2e。
 
+## Execution Harness / 双后端装配
+通常联动：
+- `backend/alice/core/config/settings.py`
+- `backend/alice/core/config/loader.py`
+- `backend/alice/core/registry/command_registry.py`
+- `backend/alice/application/services/orchestration_service.py`
+- `backend/alice/application/services/lifecycle_service.py`
+- `backend/alice/domain/execution/executors/local_process_executor.py`
+- `backend/alice/domain/execution/executors/docker_executor.py`
+- `backend/alice/domain/execution/models/command.py`
+- `backend/alice/domain/execution/services/execution_service.py`
+- `backend/tests/unit/test_core/test_command_registry.py`
+- `backend/tests/unit/test_application/test_lifecycle_service.py`
+- `backend/tests/unit/test_domain/test_local_process_executor.py`
+
+当前边界：
+- 当前默认通过 `Settings.harness.name -> CommandRegistry.create_harness()` 选择 execution harness，主路径是 `container` harness + `DockerExecutor` / `DockerExecutionBackend`；`local_process_executor.py` 保留给单进程 runtime 场景。
+- `ExecutionService` 与 `LifecycleService` 都依赖同一个 `HarnessBundle`，因此修改默认 backend、环境名或 readiness 语义时，不能只看 executor。
+- `Command.environment` / tool metadata / executor `environment_name` 需要保持一致，否则日志、tool result metadata 与测试断言会漂移。
+- `backend/alice/core/config/settings.py` 与 `backend/alice/infrastructure/docker/config.py` 都定义了 `DockerConfig`，前者偏用户配置，后者偏运行时容器模型；修改 Docker 相关字段时要确认改的是哪一层。
+
 ## Bridge compatibility logging
 通常联动：
 - `backend/alice/infrastructure/bridge/legacy_compatibility_serializer.py`
@@ -109,9 +130,12 @@
 - `backend/alice/cli/main.py`
 - `backend/tests/unit/test_domain/test_chat_workflow.py`
 - `backend/tests/unit/test_domain/test_stream_service.py`
+- `backend/tests/integration/test_logging_e2e.py`
 
 当前边界：
 - tool calling capability 不是纯 provider 内部细节；CLI 环境变量、stream service request kwargs 与 provider capability dataclass 会一起联动。
+- `ChatWorkflow -> FunctionCallingOrchestrator -> ToolRegistry -> ExecutionService -> harness executor` 是当前结构化工具执行主链；若改 tool schema、参数验证、environment metadata 或执行后端，至少同步看这条主链和对应测试。
+- `ExecutionService` 仍保留 `toolkit` / `update_prompt` / `todo` / `memory` 等 builtin 文本命令拦截，属于与结构化 tool schema 并存的兼容轨；改工具能力时不要只改其中一条入口。
 - `StreamService.build_tool_kwargs()` 是当前显式 capability gate、tool binding 与 binding 日志的单点；若改绑定规则，至少同步看 `chat_workflow.py` 的 request kwargs 装配、`test_stream_service.py` 与 `test_provider_capability.py`。
 - `ChatWorkflow` 负责准备 iteration 级 `request_envelope` 与 provider metadata 投影，但不应再复制第二套 capability 决策逻辑。
 
@@ -131,6 +155,40 @@
 - `bootstrap.create_agent_from_env()` 负责把 `Settings`、请求头 profile 解析和 provider capability 拼成启动装配，不应在 CLI 主链继续散落第二套默认值。
 - `OrchestrationService.create_from_settings()` 是 `Settings -> create_from_config()` 的显式透传边界；若新增运行时配置字段，至少同步看 loader、bootstrap、orchestration 与对应单测。
 - `ExecutionService._update_prompt_file()` 已通过 `settings.get_absolute_path(settings.prompt_path)` 走统一配置路径，修改 prompt/memory 路径语义时要一起回归。
+
+## 配置 / CLI 启动装配
+通常联动：
+- `backend/alice/core/config/settings.py`
+- `backend/alice/core/config/loader.py`
+- `backend/alice/cli/bootstrap.py`
+- `backend/alice/application/services/orchestration_service.py`
+- `backend/alice/domain/execution/services/execution_service.py`
+- `backend/tests/unit/test_core/test_config_loader.py`
+- `backend/tests/unit/test_cli/test_bootstrap.py`
+- `backend/tests/unit/test_application/test_orchestration_service.py`
+
+当前边界：
+- `.alice/config.json` 已是运行时配置源，`ConfigLoader` 负责把 JSON 解析为 `Settings`，再叠加环境变量覆盖。
+- `bootstrap.create_agent_from_env()` 负责把 `Settings`、请求头 profile 解析和 provider capability 拼成启动装配，不应在 CLI 主链继续散落第二套默认值。
+- `bootstrap.ensure_runtime_scaffold()` 是首次运行时脚手架边界：负责补齐 `.alice/config.json`、`.alice/prompt.xml`、`.alice/memory/*`；改默认 prompt/config/memory 路径时，要同时看 scaffold、loader、orchestration 与对应测试。
+- `OrchestrationService.create_from_settings()` 是 `Settings -> create_from_config()` 的显式透传边界；若新增运行时配置字段，至少同步看 loader、bootstrap、orchestration 与对应单测。
+- `ExecutionService._update_prompt_file()` 已通过 `settings.get_absolute_path(settings.prompt_path)` 走统一配置路径，修改 prompt/memory 路径语义时要一起回归。
+
+## Prompt fragments / runtime prompt assembly
+通常联动：
+- `prompts/01_identity.xml`
+- `prompts/02_principles.xml`
+- `prompts/03_memory.xml`
+- `prompts/04_tools.xml`
+- `prompts/05_output.xml`
+- `backend/alice/cli/bootstrap.py`
+- `backend/alice/domain/execution/services/execution_service.py`
+- `backend/tests/unit/test_cli/test_bootstrap.py`
+
+当前边界：
+- `prompts/01_identity.xml` 到 `prompts/05_output.xml` 是 prompt 源分片，`bootstrap.py` 通过固定顺序组装它们生成运行时 `.alice/prompt.xml`。
+- 运行时消费与 `update_prompt` 写入的都是 `.alice/prompt.xml`，不会回写 `prompts/` 源分片；因此改 prompt 分片内容、顺序、标签格式或目标路径时，要同步检查首次组装与后续写入语义是否一致。
+- `.alice/prompt.xml` 是当前运行时真实输入边界，但不是长期设计文档；长期 prompt 规则仍应沉淀在 `prompts/` 源文件与 `docs/`。
 
 ## Gateway / WebSocket 传输
 通常联动：

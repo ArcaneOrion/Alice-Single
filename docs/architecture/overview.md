@@ -10,13 +10,21 @@ Alice-Single 由四个核心部分组成：
 - `frontend/`: Rust TUI，负责交互、渲染、输入和与后端的桥接。
 - `backend/alice/`: Python 引擎，负责 workflow、LLM 编排、领域能力与基础设施适配。
 - `protocols/`: 共享协议与 schema，尤其是 Bridge contract。
-- `Dockerfile.sandbox`: 沙盒执行环境定义。
+- `Dockerfile.sandbox`: 单容器轻量 runtime 定义。
 
 核心通信链路：
 
 ```text
 Rust TUI <-> Bridge transport/protocol <-> Python workflow/agent <-> domain services/tools
 ```
+
+当前默认执行模型：
+
+- agent 运行在单个轻量容器内
+- `run_bash` / `run_python` 默认通过 runtime 容器执行
+- 宿主机 `.alice` 映射到容器 `/app/.alice`
+- 宿主机 `skills/` 映射到容器 `/app/skills`
+- 宿主机 `.alice/workspace` 映射到容器 `/workspace`
 
 ## 分层边界
 

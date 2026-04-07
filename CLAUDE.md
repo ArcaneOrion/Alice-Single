@@ -11,11 +11,11 @@
 ## 最小启动
 
 ```bash
-# 1. 配置环境变量
-cp .env.example .env
-# 编辑 .env，设置 API_KEY 和 MODEL_NAME
+# 1. 配置运行时 LLM
+${EDITOR:-vi} .alice/config.json
+# 编辑 llm.api_key / llm.model_name，按需设置 llm.base_url
 
-# 2. 运行（首次启动自动构建 Docker 镜像）
+# 2. 运行（首次启动会自动补齐 `.alice/` 运行时目录，并按需构建 Docker 镜像）
 cd frontend && cargo run --release
 ```
 
@@ -26,7 +26,7 @@ cd frontend && cargo run --release
 | 构建运行 | `cd frontend && cargo run --release` |
 | 列出/刷新技能 | 在 TUI 中发送 `toolkit list` / `toolkit refresh` |
 | 检查容器 | `docker ps -a --filter name=alice-sandbox-instance` |
-| 同步文档索引 | `/code-map` |
+| 同步文档索引 | `/code_map_team` |
 
 **TUI 快捷键**：`Enter` 发送 | `Esc` 中断 | `Ctrl+O` 切换思考侧边栏 | `Ctrl+C` 退出
 
@@ -79,11 +79,12 @@ cd frontend && cargo fmt --check
 ## 重要约束
 
 1. **双入口并存**：`cli/main.py`（新，AliceAgent + WorkflowChain）和 `bridge/server.py`（旧，BridgeServer + MessageHandler）并行存在
-2. **三处容器初始化重复**：`LifecycleService`、`DockerExecutor`、`ContainerManager` 各自实现三阶段初始化
+2. **Execution Harness 双路径**：当前默认是 `container` harness（`LocalProcessExecutor`），`docker` 为兼容路径；改执行后端时要联动 `command_registry.py`、`lifecycle_service.py`、`execution_service.py` 与相关测试
 3. **类型重复定义**：`AgentStatus`、`Author`、`Message` 在 Rust app/core/ui 层各有独立定义，通过转换函数互转
 4. **`MessageQueue` 未使用**：已定义但 `App` 直接用 `Vec<Message>`
 5. **`EventBus` 基本空转**：创建后未实际用于事件分发
 6. **安全审查弱**：仅拦截 `rm` 命令
-7. **修改代码后**如影响架构、协议、代码地图、日志或测试入口，请运行 `/code-map` 以同步 `docs/` 下的相关文档索引
+7. **运行时配置与 Prompt 边界**：`.alice/config.json` 是运行时配置源；`prompts/01_identity.xml` 到 `05_output.xml` 会组装为运行时 `.alice/prompt.xml`
+8. **修改代码后**如影响架构、协议、代码地图、日志或测试入口，请运行 `/code_map_team` 以同步 `docs/` 下的相关文档索引
 
 ---
