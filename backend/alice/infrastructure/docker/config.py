@@ -81,9 +81,10 @@ class DockerConfig:
     def default_mounts(self) -> List[MountConfig]:
         """获取默认挂载配置
 
-        仅同步技能库和输出目录，隔离记忆、人设及源代码。
+        同步技能库、.alice 运行时目录和输出目录。
         """
         skills_path = self.project_root / "skills"
+        runtime_path = self.project_root / ".alice"
         output_path = self.project_root / ".alice" / "workspace"
 
         return [
@@ -93,8 +94,13 @@ class DockerConfig:
                 read_only=False,
             ),
             MountConfig(
+                host_path=runtime_path,
+                container_path="/app/.alice",
+                read_only=False,
+            ),
+            MountConfig(
                 host_path=output_path,
-                container_path="/app/alice_output",
+                container_path="/workspace",
                 read_only=False,
             ),
         ]

@@ -82,8 +82,17 @@ class TestConfigLoader(unittest.TestCase):
         self.assertEqual(settings.memory.stm_path, ".alice/memory/short_term_memory.md")
         self.assertEqual(settings.memory.ltm_path, ".alice/memory/alice_memory.md")
         self.assertEqual(settings.memory.todo_path, ".alice/memory/todo.md")
+        self.assertEqual(settings.harness.name, "container")
         self.assertEqual(settings.logging.logs_dir, ".alice/logs")
         self.assertEqual(settings.output_dir, ".alice/workspace")
+        self.assertEqual(
+            settings.docker.mounts,
+            {
+                "skills": "/app/skills",
+                ".alice": "/app/.alice",
+                ".alice/workspace": "/workspace",
+            },
+        )
 
     def test_build_default_config_data_uses_runtime_defaults(self) -> None:
         """默认配置序列化应保留 .alice 运行时路径约定。"""
@@ -94,6 +103,15 @@ class TestConfigLoader(unittest.TestCase):
         self.assertEqual(config_data["memory"]["stm_path"], ".alice/memory/short_term_memory.md")
         self.assertEqual(config_data["memory"]["ltm_path"], ".alice/memory/alice_memory.md")
         self.assertEqual(config_data["memory"]["todo_path"], ".alice/memory/todo.md")
+        self.assertEqual(config_data["harness"]["name"], "container")
+        self.assertEqual(
+            config_data["docker"]["mounts"],
+            {
+                "skills": "/app/skills",
+                ".alice": "/app/.alice",
+                ".alice/workspace": "/workspace",
+            },
+        )
         self.assertEqual(config_data["logging"]["logs_dir"], ".alice/logs")
         self.assertEqual(config_data["output_dir"], ".alice/workspace")
 

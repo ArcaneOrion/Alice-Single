@@ -1,59 +1,31 @@
-# Alice Agent 全能沙盒镜像
-# 这是一个为 Alice 设计的高权限、全功能 Linux 运行环境
+# Alice Agent 轻量运行镜像
+# 单容器承载 agent，本地进程直接执行 bash / python
 
-FROM ubuntu:24.04
+FROM python:3.11-slim
 
-# 避免交互式提示
-ENV DEBIAN_FRONTEND=noninteractive
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    PYTHONUNBUFFERED=1
 
-# 设置工作目录
 WORKDIR /app
 
-# 1. 更新基础系统并安装核心工具
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash \
     ca-certificates \
     curl \
-    wget \
     git \
-    build-essential \
-    pkg-config \
-    libssl-dev \
-    unzip \
-    vim \
+    nodejs \
+    npm \
     procps \
-    python3 \
-    python3-pip \
-    python3-dev \
-    python3-venv \
+    && python -m pip install --no-cache-dir --upgrade pip setuptools wheel \
+    && python -m pip install --no-cache-dir openai python-dotenv \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. 安装 Node.js 和 Npx (通过 NodeSource)
-RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
-    && apt-get install -y nodejs \
-    && npm install -g npm@latest \
-    && rm -rf /var/lib/apt/lists/*
+RUN useradd --create-home --shell /bin/bash alice \
+    && mkdir -p /app/.alice /app/skills /workspace \
+    && chown -R alice:alice /app /workspace /home/alice
 
-# 3. 建立容器内 Python 虚拟环境 (解决包冲突的关键)
-ENV VIRTUAL_ENV=/opt/alice_env
-RUN python3 -m venv $VIRTUAL_ENV
-ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+USER alice
 
-# 4. 在虚拟环境中安装/升级 Python 基础库
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel
-
-# 5. 安装 Playwright 及其系统依赖 (为了能跑 Chromium)
-RUN pip install --no-cache-dir playwright \
-    && playwright install-deps chromium \
-    && playwright install chromium
-
-# 6. 迁移项目核心 Python 依赖
-COPY requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
-
-# 7. 环境变量配置
-ENV LANG=C.UTF-8
-ENV LC_ALL=C.UTF-8
-ENV PYTHONUNBUFFERED=1
-
-# 默认启动 Shell
 CMD ["/bin/bash"]

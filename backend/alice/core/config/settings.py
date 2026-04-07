@@ -69,7 +69,7 @@ class WorkflowConfig:
 class HarnessConfig:
     """运行时装配配置"""
 
-    name: str = "docker"
+    name: str = "container"
     skill_source_name: str = "default"
 
 
@@ -84,7 +84,8 @@ class DockerConfig:
     mounts: dict[str, str] = field(
         default_factory=lambda: {
             "skills": "/app/skills",
-            ".alice/workspace": "/app/alice_output",
+            ".alice": "/app/.alice",
+            ".alice/workspace": "/workspace",
         }
     )
     timeout: int = 120
