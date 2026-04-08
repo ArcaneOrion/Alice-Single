@@ -85,10 +85,19 @@ class ContainerManager:
                 logger.info(f"创建挂载目录: {mount.host_path}")
                 mount.host_path.mkdir(parents=True, exist_ok=True)
 
+    def _ensure_workspace_permissions(self) -> None:
+        """确保 workspace 目录权限为 777，使容器内 alice 用户可写。"""
+        workspace_host = self.config.project_root / ".alice" / "workspace"
+        if workspace_host.exists():
+            import os
+            os.chmod(workspace_host, 0o777)
+            logger.info("已设置 workspace 目录权限为 777")
+
     def _create_and_start(self) -> bool:
         """创建并启动新容器。"""
-        logger.info("正在初始化 Alice 常驻实验室容器 (最小权限隔离模式)...")
+        logger.info("正在初始化 Alice 常驻实验室容器...")
         self._ensure_mount_directories()
+        self._ensure_workspace_permissions()
         result = self.client.run_container()
 
         if not result.success:
@@ -98,13 +107,13 @@ class ContainerManager:
 
         logger.info(
             f"容器 {self.config.container.name} 已成功初始化。"
-            "记忆与人设文件已实现物理隔离保护。"
         )
         return True
 
     def _start_existing(self) -> bool:
         """启动已存在的容器。"""
         logger.info("正在唤醒 Alice 常驻实验室容器...")
+        self._ensure_workspace_permissions()
         result = self.client.start_container()
 
         if not result.success:
