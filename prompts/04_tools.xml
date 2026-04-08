@@ -1,6 +1,6 @@
 <tools>
 <rule>调用技能前，先读取对应 skills/&lt;skill&gt;/SKILL.md，避免凭印象使用。</rule>
 <rule>容器内执行保持相对路径。</rule>
-<rule>产出文件优先写到约定输出目录，不要散落在工作目录根部。</rule>
+<rule>产出文件默认写到 `/workspace/`；它对应宿主机 `.alice/workspace/`。</rule>
 <rule>如发现现有人设或流程明显缺陷，可用 update_prompt 自我修正。</rule>
 </tools>

@@ -9,6 +9,7 @@ from backend.alice.application.services import LifecycleService, OrchestrationSe
 from backend.alice.application.workflow import ChatWorkflow, WorkflowChain
 from backend.alice.core.config.loader import build_default_config_data, load_config
 from backend.alice.core.logging import configure_logging
+from backend.alice.core.prompts import copy_prompt_templates, rebuild_runtime_prompt
 from backend.alice.core.registry import get_llm_registry
 from backend.alice.domain.llm.providers.base import ProviderCapability
 from backend.alice.domain.memory.stores.working_store import WorkingMemoryStore
@@ -21,28 +22,6 @@ _RUNTIME_MEMORY_FILES = {
     ".alice/memory/alice_memory.md": "# Alice 的长期记忆\n",
     ".alice/memory/todo.md": "# Alice 的任务清单\n\n",
 }
-
-_SYSTEM_PROMPT_LAYER_FILES = [
-    "01_identity.xml",
-    "02_principles.xml",
-    "03_memory.xml",
-    "04_tools.xml",
-    "05_output.xml",
-]
-
-
-def compose_system_prompt(*, project_root: Path) -> str:
-    """按固定顺序组装 XML 系统提示词。"""
-    prompts_dir = project_root / "prompts"
-    fragments: list[str] = []
-
-    for filename in _SYSTEM_PROMPT_LAYER_FILES:
-        fragment_path = prompts_dir / filename
-        fragments.append(fragment_path.read_text(encoding="utf-8").strip())
-
-    joined_fragments = "\n".join(fragments)
-    return f"<system_prompt>\n{joined_fragments}\n</system_prompt>\n"
-
 
 def parse_request_header_profiles(profiles_str: str) -> list[dict]:
     """解析环境变量中的请求头轮询配置。"""
@@ -66,8 +45,10 @@ def ensure_runtime_scaffold(*, project_root: Path) -> None:
     """确保 .alice 运行时目录与最小脚手架存在。"""
     runtime_dir = project_root / ".alice"
     memory_dir = runtime_dir / "memory"
+    prompt_dir = runtime_dir / "prompt"
     runtime_dir.mkdir(exist_ok=True)
     memory_dir.mkdir(parents=True, exist_ok=True)
+    prompt_dir.mkdir(parents=True, exist_ok=True)
 
     config_path = runtime_dir / "config.json"
     if not config_path.exists():
@@ -76,9 +57,8 @@ def ensure_runtime_scaffold(*, project_root: Path) -> None:
             encoding="utf-8",
         )
 
-    prompt_path = runtime_dir / "prompt.xml"
-    if not prompt_path.exists():
-        prompt_path.write_text(compose_system_prompt(project_root=project_root), encoding="utf-8")
+    copy_prompt_templates(template_dir=project_root / "prompts", target_dir=prompt_dir)
+    rebuild_runtime_prompt(prompts_dir=prompt_dir, prompt_path=prompt_dir / "prompt.xml")
 
     for relative_path, default_content in _RUNTIME_MEMORY_FILES.items():
         target_path = project_root / relative_path
@@ -135,6 +115,11 @@ def create_agent_from_env(
         raise ValueError("LLM 配置缺少 model_name")
 
     orchestration = OrchestrationService.create_from_settings(settings, capabilities=capabilities)
+    execution_service = getattr(orchestration, "execution_service", None)
+    chat_service = getattr(orchestration, "chat_service", None)
+    set_prompt_runtime_hooks = getattr(execution_service, "set_prompt_runtime_hooks", None)
+    if callable(set_prompt_runtime_hooks) and chat_service is not None:
+        set_prompt_runtime_hooks(refresh_prompt=chat_service.set_system_prompt)
 
     lifecycle = LifecycleService(
         project_root=project_root,

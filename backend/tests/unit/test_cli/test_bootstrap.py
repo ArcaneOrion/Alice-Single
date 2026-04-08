@@ -3,34 +3,47 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
-from backend.alice.core.config.settings import HarnessConfig, LLMConfig, MemoryConfig, Settings, WorkflowConfig
+from backend.alice.core.config.settings import (
+    HarnessConfig,
+    LLMConfig,
+    MemoryConfig,
+    Settings,
+    WorkflowConfig,
+)
 from backend.alice.domain.llm.providers.base import ProviderCapability
+
+
+def _write_prompt_templates(project_root) -> None:
+    prompts_dir = project_root / "prompts"
+    prompts_dir.mkdir()
+    (prompts_dir / "01_identity.xml").write_text("<identity>Identity</identity>\n", encoding="utf-8")
+    (prompts_dir / "02_principles.xml").write_text("<principles>Principles</principles>\n", encoding="utf-8")
+    (prompts_dir / "03_memory.xml").write_text("<memory>Memory</memory>\n", encoding="utf-8")
+    (prompts_dir / "04_tools.xml").write_text("<tools>Tools</tools>\n", encoding="utf-8")
+    (prompts_dir / "05_output.xml").write_text("<output>Output</output>\n", encoding="utf-8")
 
 
 def test_ensure_runtime_scaffold_creates_runtime_files(tmp_path) -> None:
     from backend.alice.cli import bootstrap
 
     project_root = tmp_path
-    (project_root / "prompts").mkdir()
-    (project_root / "prompts" / "01_identity.xml").write_text("<identity>Identity</identity>\n", encoding="utf-8")
-    (project_root / "prompts" / "02_principles.xml").write_text(
-        "<principles>Principles</principles>\n", encoding="utf-8"
-    )
-    (project_root / "prompts" / "03_memory.xml").write_text("<memory>Memory</memory>\n", encoding="utf-8")
-    (project_root / "prompts" / "04_tools.xml").write_text("<tools>Tools</tools>\n", encoding="utf-8")
-    (project_root / "prompts" / "05_output.xml").write_text("<output>Output</output>\n", encoding="utf-8")
+    _write_prompt_templates(project_root)
 
     bootstrap.ensure_runtime_scaffold(project_root=project_root)
 
     config_path = project_root / ".alice" / "config.json"
-    prompt_path = project_root / ".alice" / "prompt.xml"
+    prompt_dir = project_root / ".alice" / "prompt"
+    prompt_path = prompt_dir / "prompt.xml"
     working_memory_path = project_root / ".alice" / "memory" / "working_memory.md"
     stm_path = project_root / ".alice" / "memory" / "short_term_memory.md"
     ltm_path = project_root / ".alice" / "memory" / "alice_memory.md"
     todo_path = project_root / ".alice" / "memory" / "todo.md"
 
     assert config_path.exists()
+    assert (prompt_dir / "01_identity.xml").read_text(encoding="utf-8") == "<identity>Identity</identity>\n"
+    assert (prompt_dir / "05_output.xml").read_text(encoding="utf-8") == "<output>Output</output>\n"
     assert json.loads(config_path.read_text(encoding="utf-8"))["memory"]["todo_path"] == ".alice/memory/todo.md"
+    assert json.loads(config_path.read_text(encoding="utf-8"))["memory"]["prompt_path"] == ".alice/prompt/prompt.xml"
     assert prompt_path.read_text(encoding="utf-8") == (
         "<system_prompt>\n"
         "<identity>Identity</identity>\n"
@@ -50,20 +63,20 @@ def test_ensure_runtime_scaffold_does_not_overwrite_existing_files(tmp_path) -> 
     from backend.alice.cli import bootstrap
 
     project_root = tmp_path
-    (project_root / "prompts").mkdir()
-    (project_root / "prompts" / "01_identity.xml").write_text("<identity>Identity</identity>\n", encoding="utf-8")
-    (project_root / "prompts" / "02_principles.xml").write_text(
-        "<principles>Principles</principles>\n", encoding="utf-8"
-    )
-    (project_root / "prompts" / "03_memory.xml").write_text("<memory>Memory</memory>\n", encoding="utf-8")
-    (project_root / "prompts" / "04_tools.xml").write_text("<tools>Tools</tools>\n", encoding="utf-8")
-    (project_root / "prompts" / "05_output.xml").write_text("<output>Output</output>\n", encoding="utf-8")
+    _write_prompt_templates(project_root)
     runtime_dir = project_root / ".alice"
     memory_dir = runtime_dir / "memory"
+    prompt_dir = runtime_dir / "prompt"
     memory_dir.mkdir(parents=True)
+    prompt_dir.mkdir(parents=True)
 
     (runtime_dir / "config.json").write_text('{"memory":{"todo_path":"custom/todo.md"}}\n', encoding="utf-8")
-    (runtime_dir / "prompt.xml").write_text("<system_prompt>custom prompt</system_prompt>\n", encoding="utf-8")
+    (prompt_dir / "01_identity.xml").write_text("<identity>Custom Identity</identity>\n", encoding="utf-8")
+    (prompt_dir / "02_principles.xml").write_text("<principles>Custom Principles</principles>\n", encoding="utf-8")
+    (prompt_dir / "03_memory.xml").write_text("<memory>Custom Memory</memory>\n", encoding="utf-8")
+    (prompt_dir / "04_tools.xml").write_text("<tools>Custom Tools</tools>\n", encoding="utf-8")
+    (prompt_dir / "05_output.xml").write_text("<output>Custom Output</output>\n", encoding="utf-8")
+    (prompt_dir / "prompt.xml").write_text("<system_prompt>stale aggregate</system_prompt>\n", encoding="utf-8")
     (memory_dir / "working_memory.md").write_text("custom working\n", encoding="utf-8")
     (memory_dir / "short_term_memory.md").write_text("custom stm\n", encoding="utf-8")
     (memory_dir / "alice_memory.md").write_text("custom ltm\n", encoding="utf-8")
@@ -72,7 +85,17 @@ def test_ensure_runtime_scaffold_does_not_overwrite_existing_files(tmp_path) -> 
     bootstrap.ensure_runtime_scaffold(project_root=project_root)
 
     assert (runtime_dir / "config.json").read_text(encoding="utf-8") == '{"memory":{"todo_path":"custom/todo.md"}}\n'
-    assert (runtime_dir / "prompt.xml").read_text(encoding="utf-8") == "<system_prompt>custom prompt</system_prompt>\n"
+    assert (prompt_dir / "01_identity.xml").read_text(encoding="utf-8") == "<identity>Custom Identity</identity>\n"
+    assert (prompt_dir / "05_output.xml").read_text(encoding="utf-8") == "<output>Custom Output</output>\n"
+    assert (prompt_dir / "prompt.xml").read_text(encoding="utf-8") == (
+        "<system_prompt>\n"
+        "<identity>Custom Identity</identity>\n"
+        "<principles>Custom Principles</principles>\n"
+        "<memory>Custom Memory</memory>\n"
+        "<tools>Custom Tools</tools>\n"
+        "<output>Custom Output</output>\n"
+        "</system_prompt>\n"
+    )
     assert (memory_dir / "working_memory.md").read_text(encoding="utf-8") == "custom working\n"
     assert (memory_dir / "short_term_memory.md").read_text(encoding="utf-8") == "custom stm\n"
     assert (memory_dir / "alice_memory.md").read_text(encoding="utf-8") == "custom ltm\n"
@@ -91,7 +114,7 @@ def test_create_agent_from_env_ignores_request_header_profiles_env(monkeypatch) 
             request_header_profiles=[{"X-Base": "1"}],
         ),
         workflow=WorkflowConfig(max_iterations=23, max_history=81),
-        memory=MemoryConfig(prompt_path=".alice/prompt.xml"),
+        memory=MemoryConfig(prompt_path=".alice/prompt/prompt.xml"),
         harness=HarnessConfig(name="docker", skill_source_name="default"),
     )
 
@@ -99,22 +122,24 @@ def test_create_agent_from_env_ignores_request_header_profiles_env(monkeypatch) 
     monkeypatch.setenv("REQUEST_HEADER_PROFILES", '[{"X-Env":"1"}]')
 
     class _Registry:
-        def resolve_request_header_profiles(self, provider_name, base_url, profiles):
+        def resolve_request_header_profiles(self, _provider_name, _base_url, profiles):
             return profiles
 
     monkeypatch.setattr(bootstrap, "get_llm_registry", lambda: _Registry())
+    def fake_create_from_settings(settings_arg, *, capabilities=None, extra_headers=None):
+        _ = settings_arg, capabilities, extra_headers
+        return SimpleNamespace(
+            chat_service="chat-service",
+            execution_service="execution-service",
+            tool_registry="tool-registry",
+            function_calling_orchestrator="tool-orchestrator",
+            harness_bundle=SimpleNamespace(backend="backend-instance"),
+        )
+
     monkeypatch.setattr(
         bootstrap.OrchestrationService,
         "create_from_settings",
-        staticmethod(
-            lambda settings_arg, *, capabilities=None, extra_headers=None: SimpleNamespace(
-                chat_service="chat-service",
-                execution_service="execution-service",
-                tool_registry="tool-registry",
-                function_calling_orchestrator="tool-orchestrator",
-                harness_bundle=SimpleNamespace(backend="backend-instance"),
-            )
-        ),
+        staticmethod(fake_create_from_settings),
     )
     monkeypatch.setattr(
         bootstrap,
@@ -148,7 +173,7 @@ def test_create_agent_from_env_reports_missing_config(monkeypatch) -> None:
     monkeypatch.setattr(bootstrap, "load_config", lambda: settings)
 
     class _Registry:
-        def resolve_request_header_profiles(self, provider_name, base_url, profiles):
+        def resolve_request_header_profiles(self, _provider_name, _base_url, profiles):
             return profiles
 
     monkeypatch.setattr(bootstrap, "get_llm_registry", lambda: _Registry())
@@ -174,7 +199,7 @@ def test_create_agent_from_env_builds_workflow_from_settings(monkeypatch) -> Non
             supports_tool_calling=False,
         ),
         workflow=WorkflowConfig(max_iterations=23, max_history=81),
-        memory=MemoryConfig(prompt_path=".alice/prompt.xml"),
+        memory=MemoryConfig(prompt_path=".alice/prompt/prompt.xml"),
         harness=HarnessConfig(name="docker", skill_source_name="default"),
     )
 

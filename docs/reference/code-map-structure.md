@@ -7,7 +7,7 @@
 - `backend/alice/`：Python 引擎。
 - `backend/tests/`：后端测试。
 - `protocols/`：跨语言协议与 schema。
-- `prompts/`：XML prompt 分层源码，按固定顺序组装为运行时 `.alice/prompt.xml`。
+- `prompts/`：XML prompt 默认模板；首次运行会复制到 `.alice/prompt/*.xml`，再按固定顺序组装为运行时 `.alice/prompt/prompt.xml`。
 - `skills/`：技能目录与 `SKILL.md`。
 - `docs/`：结构化文档。
 
@@ -25,7 +25,7 @@
 - `backend/alice/application/agent/`：请求入口与中断控制；`agent.py` 负责补齐 correlation ids、构建 `runtime_context` 与 `request_envelope`，并一并挂到 workflow。
 - `backend/alice/application/workflow/`：工作流编排；`base_workflow.py` 的 `WorkflowContext` 同时携带 `runtime_context` 与 `request_envelope`，`chat_workflow.py` 是 canonical runtime event 与 tool loop 编排中心，`function_calling_orchestrator.py` 负责 structured tool call -> execution -> tool message 回注。
 - `backend/alice/application/services/`：编排与运行时生命周期服务；`orchestration_service.py` 收敛 memory、skills、tool registry、stream service 与 function-calling orchestrator，并新增 `create_from_settings()` 作为 `Settings -> runtime assembly` 的集中入口；`lifecycle_service.py` 则跟随当前 harness backend 管理 runtime 初始化、状态与清理。
-- `backend/alice/cli/`：当前默认 Python CLI / TUI bridge 入口；`bootstrap.py` 负责补齐 `.alice/config.json`、`.alice/prompt.xml`、`.alice/memory/*` 等运行时脚手架，并把配置装配为 orchestration / lifecycle / workflow；`main.py` 通过它收口 runtime logging 与启动流程。
+- `backend/alice/cli/`：当前默认 Python CLI / TUI bridge 入口；`bootstrap.py` 负责补齐 `.alice/config.json`、`.alice/prompt/*.xml`、`.alice/prompt/prompt.xml`、`.alice/memory/*` 等运行时脚手架，并把配置装配为 orchestration / lifecycle / workflow；`main.py` 通过它收口 runtime logging 与启动流程。
 - `backend/alice/domain/`：execution、llm、memory、skills 等业务逻辑。
 - `backend/alice/domain/execution/executors/`：执行后端实现；当前默认 `container` harness 装配到 `docker_executor.py`，`local_process_executor.py` 保留给单进程 runtime 场景。
 - `backend/alice/domain/execution/services/`：`execution_service.py` 负责结构化工具执行、builtin 命令拦截与 executor 路由，`tool_registry.py` 提供工具快照与模型 function schema。

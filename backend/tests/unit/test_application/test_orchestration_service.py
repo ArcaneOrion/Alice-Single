@@ -3,7 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-from backend.alice.core.config.settings import HarnessConfig, LLMConfig, MemoryConfig, Settings, WorkflowConfig
+from backend.alice.core.config.settings import (
+    HarnessConfig,
+    LLMConfig,
+    MemoryConfig,
+    Settings,
+    WorkflowConfig,
+)
 
 
 def test_create_from_settings_forwards_runtime_config() -> None:
@@ -20,7 +26,7 @@ def test_create_from_settings_forwards_runtime_config() -> None:
         ),
         workflow=WorkflowConfig(max_history=77),
         memory=MemoryConfig(
-            prompt_path=".alice/prompt.xml",
+            prompt_path=".alice/prompt/prompt.xml",
             working_memory_path=".alice/memory/working_memory.md",
             stm_path=".alice/memory/short_term_memory.md",
             ltm_path=".alice/memory/alice_memory.md",
@@ -33,7 +39,7 @@ def test_create_from_settings_forwards_runtime_config() -> None:
 
     captured: dict[str, object] = {}
 
-    def fake_create_from_config(cls, **kwargs):
+    def fake_create_from_config(_cls, **kwargs):
         captured.update(kwargs)
         return "orchestration"
 
@@ -46,7 +52,7 @@ def test_create_from_settings_forwards_runtime_config() -> None:
         "base_url": "https://example.com/v1",
         "model_name": "gpt-4.1",
         "project_root": Path("/tmp/alice-project"),
-        "prompt_path": ".alice/prompt.xml",
+        "prompt_path": ".alice/prompt/prompt.xml",
         "working_memory_path": ".alice/memory/working_memory.md",
         "stm_path": ".alice/memory/short_term_memory.md",
         "ltm_path": ".alice/memory/alice_memory.md",

@@ -4,14 +4,14 @@
 测试 Command、CommandType、ExecutionEnvironment 等模型
 """
 
-import pytest
+from dataclasses import FrozenInstanceError
 
+import pytest
 from backend.alice.domain.execution.models.command import (
     Command,
     CommandType,
     ExecutionEnvironment,
 )
-
 
 # ============================================================================
 # Command 类测试
@@ -65,7 +65,7 @@ class TestCommand:
 
     def test_auto_infer_update_prompt_command(self):
         """测试自动推断 update_prompt 命令"""
-        cmd = Command(raw="update_prompt new content")
+        cmd = Command(raw='update_prompt 01_identity.xml "new content"')
 
         assert cmd.type == CommandType.BUILTIN
 
@@ -128,7 +128,7 @@ class TestCommand:
         """测试 frozen 命令不可变"""
         cmd = Command(raw="test")
 
-        with pytest.raises(Exception):  # FrozenInstanceError
+        with pytest.raises(FrozenInstanceError):
             cmd.raw = "modified"
 
 
@@ -186,7 +186,7 @@ class TestCommandParsing:
             "toolkit refresh",
             "todo buy milk",
             "memory important",
-            "update_prompt new text",
+            'update_prompt 01_identity.xml "new text"',
         ]
 
         for cmd_str in builtin_commands:

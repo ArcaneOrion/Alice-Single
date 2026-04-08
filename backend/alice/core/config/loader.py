@@ -18,6 +18,9 @@ from .settings import (
     WorkflowConfig,
 )
 
+_LEGACY_RUNTIME_PROMPT_PATH = ".alice/prompt.xml"
+_RUNTIME_PROMPT_PATH = ".alice/prompt/prompt.xml"
+
 
 class ConfigLoader:
     """配置加载器"""
@@ -89,8 +92,14 @@ class ConfigLoader:
         )
 
     def _parse_memory_config(self, data: dict[str, Any], defaults: MemoryConfig) -> MemoryConfig:
+        prompt_path = data.get("prompt_path", defaults.prompt_path)
+        if prompt_path == _LEGACY_RUNTIME_PROMPT_PATH:
+            raise ValueError(
+                f"memory.prompt_path 已废弃旧值 {_LEGACY_RUNTIME_PROMPT_PATH}，"
+                f"请改为 {_RUNTIME_PROMPT_PATH}"
+            )
         return MemoryConfig(
-            prompt_path=data.get("prompt_path", defaults.prompt_path),
+            prompt_path=prompt_path,
             working_memory_path=data.get("working_memory_path", defaults.working_memory_path),
             stm_path=data.get("stm_path", defaults.stm_path),
             ltm_path=data.get("ltm_path", defaults.ltm_path),

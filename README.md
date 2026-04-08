@@ -131,7 +131,8 @@ Alice 采用 **五层分层架构** + **Rust TUI 前端**：
    ${EDITOR:-vi} .alice/config.json
    ```
    填入 `llm.api_key`、`llm.model_name`，按需设置 `llm.base_url`、`llm.provider_name` 等字段。
-   如文件尚不存在，首次启动会自动补齐 `.alice/config.json`、`.alice/prompt.xml` 与 `.alice/memory/*`。
+   如文件尚不存在，首次启动会自动补齐 `.alice/config.json`、`.alice/prompt/*.xml`、`.alice/prompt/prompt.xml` 与 `.alice/memory/*`。
+   如果历史配置里的 `memory.prompt_path` 仍指向旧值 `.alice/prompt.xml`，启动会直接报错；当前唯一合法运行时 prompt 路径是 `.alice/prompt/prompt.xml`。
 
 7. **启动 Alice**:
    ```bash
@@ -148,7 +149,7 @@ Alice 采用 **五层分层架构** + **Rust TUI 前端**：
 | :--- | :--- |
 | `toolkit list/refresh` | 管理技能注册表 |
 | `memory "内容" [--ltm]` | 手动更新记忆 |
-| `update_prompt "新内容"` | 动态更新运行时 `.alice/prompt.xml` |
+| `update_prompt 01_identity.xml "新内容"` | 更新 `.alice/prompt/` 下的提示词分片，并重建运行时 `.alice/prompt/prompt.xml` |
 | `todo "任务清单"` | 更新任务追踪 |
 
 ---
@@ -204,7 +205,7 @@ graph LR
 - `04_tools.xml`
 - `05_output.xml`
 
-启动时，这些文件会按固定顺序组装为运行时文件 `.alice/prompt.xml`。运行时实际读取和更新的是 `.alice/prompt.xml`，而不是直接修改 `prompts/` 下的分层模板。
+启动时，仓库里的这些模板会首次复制到 `.alice/prompt/` 下供用户编辑，并按固定顺序组装为运行时文件 `.alice/prompt/prompt.xml`。运行时实际读取的是 `.alice/prompt/prompt.xml`，日常编辑入口是 `.alice/prompt/*.xml`，而不是直接修改仓库里的 `prompts/` 模板。
 
 ---
 

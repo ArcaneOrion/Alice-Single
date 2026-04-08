@@ -368,7 +368,7 @@ def _emit_manual_lifecycle_logs(logger: logging.Logger, *, task_id: str) -> None
         extra={
             "event_type": "change.file_saved",
             "log_category": "changes",
-            "data": {"file": "prompts/alice.md", "size": 512},
+            "data": {"file": ".alice/prompt/01_identity.xml", "size": 512},
         },
     )
 

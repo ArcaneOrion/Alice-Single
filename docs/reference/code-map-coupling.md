@@ -170,7 +170,7 @@
 当前边界：
 - `.alice/config.json` 已是运行时配置源，`ConfigLoader` 负责把 JSON 解析为 `Settings`，再叠加环境变量覆盖。
 - `bootstrap.create_agent_from_env()` 负责把 `Settings`、请求头 profile 解析和 provider capability 拼成启动装配，不应在 CLI 主链继续散落第二套默认值。
-- `bootstrap.ensure_runtime_scaffold()` 是首次运行时脚手架边界：负责补齐 `.alice/config.json`、`.alice/prompt.xml`、`.alice/memory/*`；改默认 prompt/config/memory 路径时，要同时看 scaffold、loader、orchestration 与对应测试。
+- `bootstrap.ensure_runtime_scaffold()` 是首次运行时脚手架边界：负责补齐 `.alice/config.json`、`.alice/prompt/*.xml`、`.alice/prompt/prompt.xml`、`.alice/memory/*`；改默认 prompt/config/memory 路径时，要同时看 scaffold、loader、orchestration 与对应测试。
 - `OrchestrationService.create_from_settings()` 是 `Settings -> create_from_config()` 的显式透传边界；若新增运行时配置字段，至少同步看 loader、bootstrap、orchestration 与对应单测。
 - `ExecutionService._update_prompt_file()` 已通过 `settings.get_absolute_path(settings.prompt_path)` 走统一配置路径，修改 prompt/memory 路径语义时要一起回归。
 
@@ -186,9 +186,9 @@
 - `backend/tests/unit/test_cli/test_bootstrap.py`
 
 当前边界：
-- `prompts/01_identity.xml` 到 `prompts/05_output.xml` 是 prompt 源分片，`bootstrap.py` 通过固定顺序组装它们生成运行时 `.alice/prompt.xml`。
-- 运行时消费与 `update_prompt` 写入的都是 `.alice/prompt.xml`，不会回写 `prompts/` 源分片；因此改 prompt 分片内容、顺序、标签格式或目标路径时，要同步检查首次组装与后续写入语义是否一致。
-- `.alice/prompt.xml` 是当前运行时真实输入边界，但不是长期设计文档；长期 prompt 规则仍应沉淀在 `prompts/` 源文件与 `docs/`。
+- 仓库 `prompts/01_identity.xml` 到 `prompts/05_output.xml` 是默认模板分片，`bootstrap.py` 会先把它们复制到 `.alice/prompt/`，再按固定顺序组装为运行时 `.alice/prompt/prompt.xml`。
+- 运行时消费的是 `.alice/prompt/prompt.xml`；用户编辑与 `update_prompt` 更新的是真实运行时分片 `.alice/prompt/*.xml`，不会回写仓库 `prompts/` 模板。
+- `.alice/prompt/*.xml` 与 `.alice/prompt/prompt.xml` 是当前运行时真实输入边界，但不是长期设计文档；长期 prompt 规则仍应沉淀在仓库 `prompts/` 与 `docs/`。
 
 ## Gateway / WebSocket 传输
 通常联动：

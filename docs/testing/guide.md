@@ -43,7 +43,8 @@ cd frontend && cargo fmt --check
 
 本组回归默认守住两个前提：
 - **`.alice/config.json` 是唯一运行时配置源**。
-- **CLI 启动会在首次 `load_config()` 前幂等补齐 `.alice/` 运行时目录**，最小包含 `.alice/config.json`、`.alice/prompt.xml`、`.alice/memory/*`；其中 `prompts/01_identity.xml` 到 `prompts/05_output.xml` 会按固定顺序组装为运行时 `.alice/prompt.xml`，运行时只读写该聚合文件。
+- **CLI 启动会在首次 `load_config()` 前幂等补齐 `.alice/` 运行时目录**，最小包含 `.alice/config.json`、`.alice/prompt/*.xml`、`.alice/prompt/prompt.xml`、`.alice/memory/*`；其中仓库 `prompts/01_identity.xml` 到 `prompts/05_output.xml` 会首次复制到 `.alice/prompt/` 供用户编辑，再按固定顺序组装为运行时 `.alice/prompt/prompt.xml`。
+- **旧运行时路径 `.alice/prompt.xml` 已废弃**；如果 `.alice/config.json` 里的 `memory.prompt_path` 仍指向它，配置加载应显式失败，而不是静默兼容或自动迁移。
 
 修改后应确认模型、header profiles、memory/logging 路径等行为**不会再被环境变量覆盖**，且二次启动**不会覆盖用户已存在的运行时文件**。
 

@@ -105,7 +105,7 @@
 使用原则：
 - 可以把它们当作调试线索。
 - 不要把它们当作架构说明或协议说明。
-- `.alice/config.json` 与 `.alice/prompt.xml` 是当前运行时真实输入边界，但它们仍属于运行时文件；长期规则、默认模板与设计语义应分别以 `backend/alice/core/config/*`、`prompts/` 与 `docs/` 为准。
+- `.alice/config.json`、`.alice/prompt/*.xml` 与 `.alice/prompt/prompt.xml` 是当前运行时真实输入边界，但它们仍属于运行时文件；其中仓库 `prompts/` 保存默认模板，长期规则与设计语义仍应以 `backend/alice/core/config/*`、`prompts/` 与 `docs/` 为准。
 - 如果某个运行时行为值得长期保留，请把知识写进 `docs/`，不要只留在产物里。
 
 ## 文档维护策略

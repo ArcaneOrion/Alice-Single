@@ -128,5 +128,5 @@ exec/
 - `docs/` 是知识沉淀区。
 - `docs/reference/*` 是代码地图的权威来源。
 - `AGENTS.md` 只保留最小地图和操作约束。
-- `.alice/`、`.alice/workspace/`、日志、缓存、coverage、build 产物是运行时数据，不是设计文档；prompt 源分片在 `prompts/`，运行时聚合文件在 `.alice/prompt.xml`。
+- `.alice/`、`.alice/workspace/`、日志、缓存、coverage、build 产物是运行时数据，不是设计文档；仓库 prompt 模板在 `prompts/`，用户可编辑分片在 `.alice/prompt/*.xml`，运行时聚合文件在 `.alice/prompt/prompt.xml`。
 - 代码改动如果引入新的长期知识，应优先补到 `docs/` 对应专题。

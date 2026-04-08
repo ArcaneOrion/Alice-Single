@@ -83,5 +83,5 @@
 ```json
 {"ts":"2026-03-28T09:00:00Z","event_type":"api.request","level":"INFO","source":"alice.domain.llm","trace_id":"tr-1","request_id":"req-1","task_id":"task-9","session_id":"sess-1","span_id":"span-1","component":"openai.client","phase":"send","payload_kind":"http","context":{"provider":"openai"},"data":{"method":"POST","url":"https://api.openai.com/v1/responses"}}
 {"ts":"2026-03-28T09:00:01Z","event_type":"model.stream_chunk","level":"DEBUG","source":"alice.domain.llm","trace_id":"tr-1","request_id":"req-1","task_id":"task-9","phase":"stream","timing":{"elapsed_ms":120},"payload_kind":"model_output","data":{"chunk":"..."}}
-{"ts":"2026-03-28T09:00:02Z","event_type":"change.file_saved","level":"INFO","source":"alice.infrastructure.bridge","task_id":"task-9","component":"workspace.writer","payload_kind":"file_change","data":{"path":"prompts/alice.md","bytes":2048}}
+{"ts":"2026-03-28T09:00:02Z","event_type":"change.file_saved","level":"INFO","source":"alice.infrastructure.bridge","task_id":"task-9","component":"workspace.writer","payload_kind":"file_change","data":{"path":".alice/prompt/01_identity.xml","bytes":2048}}
 ```

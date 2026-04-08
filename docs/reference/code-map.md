@@ -17,12 +17,12 @@
 ## 一级结构
 - `frontend/src/`：Rust TUI，负责界面、交互、事件分发、Bridge 客户端与 stdio 传输。
 - `backend/alice/`：Python 引擎，负责 agent、workflow、memory、tool execution，以及 canonical runtime context / request envelope -> legacy bridge compatibility 输出；当前树里也已包含 gateway/websocket transport 适配层。
-- `backend/alice/cli/bootstrap.py`：CLI runtime scaffold 与启动装配入口，负责补齐 `.alice/config.json`、`.alice/prompt.xml`、`.alice/memory/*`，并把 `Settings` 装配为 orchestration / lifecycle / workflow。
+- `backend/alice/cli/bootstrap.py`：CLI runtime scaffold 与启动装配入口，负责补齐 `.alice/config.json`、`.alice/prompt/*.xml`、`.alice/prompt/prompt.xml`、`.alice/memory/*`，并把 `Settings` 装配为 orchestration / lifecycle / workflow。
 - `backend/alice/domain/execution/`：执行域；当前默认通过 `core/registry/command_registry.py` 选择 `container` harness，并装配到 `docker_executor.py` / `DockerExecutionBackend`，`local_process_executor.py` 保留给单进程 runtime 场景。
 - `backend/tests/`：后端测试，含 unit / integration / performance。
 - `protocols/`：共享协议与 schema。
-- `.alice/`：运行时配置与产物目录，默认包含唯一运行时配置源 `.alice/config.json`，以及 prompt、memory、logs、workspace 等运行时文件；首次 CLI 启动会幂等补齐该目录，其中 `prompts/01_identity.xml` 到 `prompts/05_output.xml` 会按固定顺序组装为 `.alice/prompt.xml`。
-- `prompts/`：XML prompt 分层源码；`01_identity.xml` 到 `05_output.xml` 会按固定顺序组装为运行时 `.alice/prompt.xml`。
+- `.alice/`：运行时配置与产物目录，默认包含唯一运行时配置源 `.alice/config.json`，以及 prompt、memory、logs、workspace 等运行时文件；首次 CLI 启动会幂等补齐该目录，其中仓库 `prompts/01_identity.xml` 到 `prompts/05_output.xml` 会复制到 `.alice/prompt/`，再组装为 `.alice/prompt/prompt.xml`。
+- `prompts/`：XML prompt 默认模板；`01_identity.xml` 到 `05_output.xml` 会在首次启动时复制到 `.alice/prompt/`，供用户编辑。
 - `docs/`：面向 agent 的结构化知识库。
 
 ## 任务到区域

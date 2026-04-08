@@ -1,17 +1,19 @@
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-
 from backend.alice.application.runtime import (
     RequestEnvelope,
     RequestMetadata,
     RuntimeContextBuilder,
     TimeProvider,
 )
-from backend.alice.application.workflow.function_calling_orchestrator import FunctionCallingOrchestrator
+from backend.alice.application.workflow.function_calling_orchestrator import (
+    FunctionCallingOrchestrator,
+)
 from backend.alice.domain.execution.models.execution_result import ExecutionResult
 from backend.alice.domain.execution.models.tool_calling import (
     ToolArgumentValidationError,
@@ -19,9 +21,13 @@ from backend.alice.domain.execution.models.tool_calling import (
     ToolInvocation,
     ToolResultPayload,
 )
-from backend.alice.domain.execution.services.execution_service import ExecutionService, SkillSnapshotManager
+from backend.alice.domain.execution.services.execution_service import (
+    ExecutionService,
+    SkillSnapshotManager,
+)
 from backend.alice.domain.execution.services.tool_registry import ToolRegistry
 from backend.alice.domain.llm.models.message import ChatMessage
+from backend.alice.domain.llm.services.chat_service import ChatService
 from backend.alice.domain.skills.models import Skill, SkillMetadata
 
 
@@ -252,6 +258,58 @@ def test_execution_service_defaults_to_local_process_executor() -> None:
     service = ExecutionService()
 
     assert service.executor.__class__.__name__ == "LocalProcessExecutor"
+
+
+@pytest.mark.unit
+def test_execution_service_update_prompt_updates_fragment_rebuilds_prompt_and_refreshes_runtime_prompt(monkeypatch) -> None:
+    provider = MagicMock()
+    chat_service = ChatService(provider=provider, system_prompt="<system_prompt>old</system_prompt>")
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        project_root = Path(temp_dir)
+        prompt_dir = project_root / ".alice" / "prompt"
+        prompt_dir.mkdir(parents=True)
+        (prompt_dir / "01_identity.xml").write_text("<identity>Old Identity</identity>\n", encoding="utf-8")
+        (prompt_dir / "02_principles.xml").write_text("<principles>Principles</principles>\n", encoding="utf-8")
+        (prompt_dir / "03_memory.xml").write_text("<memory>Memory</memory>\n", encoding="utf-8")
+        (prompt_dir / "04_tools.xml").write_text("<tools>Tools</tools>\n", encoding="utf-8")
+        (prompt_dir / "05_output.xml").write_text("<output>Output</output>\n", encoding="utf-8")
+
+        from backend.alice.core.config.settings import MemoryConfig, Settings
+
+        settings = Settings(project_root=project_root, memory=MemoryConfig(prompt_path=".alice/prompt/prompt.xml"))
+        service = ExecutionService(executor=MagicMock())
+        service.set_prompt_runtime_hooks(
+            compose_prompt=lambda: "<system_prompt>\n<identity>New Identity</identity>\n</system_prompt>\n",
+            refresh_prompt=chat_service.set_system_prompt,
+        )
+        monkeypatch.setattr("backend.alice.domain.execution.services.execution_service.load_config", lambda: settings)
+
+        result = service._handle_update_prompt('update_prompt 01_identity.xml "<identity>New Identity</identity>"', [])
+
+        assert "01_identity.xml" in result
+        assert "下一轮对话生效" in result
+        assert (prompt_dir / "01_identity.xml").read_text(encoding="utf-8") == "<identity>New Identity</identity>\n"
+        assert (prompt_dir / "prompt.xml").read_text(encoding="utf-8") == (
+            "<system_prompt>\n<identity>New Identity</identity>\n</system_prompt>\n"
+        )
+        assert chat_service.system_prompt == "<system_prompt>\n<identity>New Identity</identity>\n</system_prompt>\n"
+
+
+@pytest.mark.unit
+def test_execution_service_update_prompt_rejects_unknown_fragment(monkeypatch) -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        project_root = Path(temp_dir)
+
+        from backend.alice.core.config.settings import MemoryConfig, Settings
+
+        settings = Settings(project_root=project_root, memory=MemoryConfig(prompt_path=".alice/prompt/prompt.xml"))
+        service = ExecutionService(executor=MagicMock())
+        monkeypatch.setattr("backend.alice.domain.execution.services.execution_service.load_config", lambda: settings)
+
+        result = service._handle_update_prompt('update_prompt unknown.xml "boom"', [])
+
+        assert result == "错误: update_prompt 仅支持更新 .alice/prompt 下的已知分片文件。"
 
 
 @pytest.mark.unit

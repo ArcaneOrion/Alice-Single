@@ -1,10 +1,10 @@
-from __future__ import annotations
-
 """
 配置数据类
 
 定义所有配置项的数据结构
 """
+
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -31,7 +31,7 @@ class LLMConfig:
 class MemoryConfig:
     """内存配置"""
 
-    prompt_path: str = ".alice/prompt.xml"
+    prompt_path: str = ".alice/prompt/prompt.xml"
     working_memory_path: str = ".alice/memory/working_memory.md"
     stm_path: str = ".alice/memory/short_term_memory.md"
     ltm_path: str = ".alice/memory/alice_memory.md"

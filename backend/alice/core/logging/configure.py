@@ -471,7 +471,7 @@ def _build_schema_payload(config: LoggingConfig) -> dict[str, object]:
                     "task_id": "task-9",
                     "component": "workspace.writer",
                     "payload_kind": "file_change",
-                    "data": {"path": "prompts/alice.md", "bytes": 2048},
+                    "data": {"path": ".alice/prompt/01_identity.xml", "bytes": 2048},
                 }
             ],
         },

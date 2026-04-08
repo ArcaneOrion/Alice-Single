@@ -8,18 +8,18 @@ import logging
 import re
 import time
 import traceback
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from backend.alice.core.config import load_config
+from backend.alice.core.prompts import is_supported_prompt_fragment, rebuild_runtime_prompt
 
+from ..builtin.memory_command import MemoryCommandHandler
+from ..builtin.todo_command import TodoCommandHandler
+from ..builtin.toolkit_command import ToolkitCommandHandler
 from ..executors.base import CommandExecutor
 from ..executors.local_process_executor import LocalProcessExecutor
 from ..models.execution_result import ExecutionResult, ExecutionStatus
 from ..models.tool_calling import ToolExecutionResult, ToolInvocation, ToolResultPayload
-from .tool_registry import ToolRegistry
-from ..builtin.memory_command import MemoryCommandHandler
-from ..builtin.todo_command import TodoCommandHandler
-from ..builtin.toolkit_command import ToolkitCommandHandler
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +39,8 @@ class _ExecutionServiceBase:
 
     def __init__(
         self,
-        executor: Optional[CommandExecutor] = None,
-        snapshot_manager=None
+        executor: CommandExecutor | None = None,
+        snapshot_manager=None,
     ):
         self.executor = executor or LocalProcessExecutor()
         self.snapshot_manager = None
@@ -62,7 +62,7 @@ class _ExecutionServiceBase:
     def execute_tool_call(
         self,
         invocation: ToolInvocation,
-        log_context: Optional[dict] = None,
+        log_context: dict | None = None,
     ) -> ToolExecutionResult:
         raise NotImplementedError
 
@@ -94,7 +94,7 @@ class _ExecutionServiceBase:
     def execute_tool_invocation(
         self,
         invocation: ToolInvocation,
-        log_context: Optional[dict] = None,
+        log_context: dict | None = None,
     ) -> ToolExecutionResult:
         return self.execute_tool_call(invocation, log_context=log_context)
 
@@ -200,12 +200,24 @@ class ExecutionService(_ExecutionServiceBase):
 
     def __init__(
         self,
-        executor: Optional[CommandExecutor] = None,
+        executor: CommandExecutor | None = None,
         snapshot_manager=None,
         tool_registry=None,
     ):
         super().__init__(executor=executor, snapshot_manager=snapshot_manager)
         self.tool_registry = tool_registry
+        self._compose_runtime_prompt_hook: Callable[[], str] | None = None
+        self._refresh_runtime_prompt_hook: Callable[[str], None] | None = None
+
+    def set_prompt_runtime_hooks(
+        self,
+        *,
+        compose_prompt: Callable[[], str] | None = None,
+        refresh_prompt: Callable[[str], None] | None = None,
+    ) -> None:
+        """设置 prompt 重建与运行时热刷新钩子。"""
+        self._compose_runtime_prompt_hook = compose_prompt
+        self._refresh_runtime_prompt_hook = refresh_prompt
 
     def _executor_environment_name(self) -> str:
         return str(getattr(self.executor, "environment_name", "container"))
@@ -213,7 +225,7 @@ class ExecutionService(_ExecutionServiceBase):
     def _executor_phase_name(self) -> str:
         return str(getattr(self.executor, "execution_phase", "container_execute"))
 
-    def _build_log_context(self, log_context: Optional[dict], phase: str) -> dict:
+    def _build_log_context(self, log_context: dict | None, phase: str) -> dict:
         """构建执行链路日志上下文。"""
         base = dict(log_context or {})
         trace_id = str(base.get("trace_id") or base.get("request_id") or "")
@@ -238,9 +250,9 @@ class ExecutionService(_ExecutionServiceBase):
         event_type: str,
         message: str,
         phase: str,
-        log_context: Optional[dict],
-        data: Optional[dict] = None,
-        error: Optional[dict] = None,
+        log_context: dict | None,
+        data: dict | None = None,
+        error: dict | None = None,
         level: str = "info",
         legacy_event_type: str = "",
         with_exc_info: bool = False,
@@ -272,7 +284,7 @@ class ExecutionService(_ExecutionServiceBase):
         self,
         command: str,
         is_python_code: bool = False,
-        log_context: Optional[dict] = None,
+        log_context: dict | None = None,
     ) -> ExecutionResult | str:
         """执行命令
 
@@ -465,7 +477,7 @@ class ExecutionService(_ExecutionServiceBase):
     def execute_tool_invocation(
         self,
         invocation: ToolInvocation,
-        log_context: Optional[dict] = None,
+        log_context: dict | None = None,
     ) -> ToolExecutionResult:
         """兼容 ChatWorkflow 的结构化工具调用入口。"""
         return self.execute_tool_call(invocation, log_context=log_context)
@@ -473,7 +485,7 @@ class ExecutionService(_ExecutionServiceBase):
     def execute_tool_call(
         self,
         invocation: ToolInvocation,
-        log_context: Optional[dict] = None,
+        log_context: dict | None = None,
     ) -> ToolExecutionResult:
         """执行结构化工具调用。"""
         registry = self.tool_registry
@@ -499,7 +511,7 @@ class ExecutionService(_ExecutionServiceBase):
 
         return self._coerce_tool_result(invocation, raw_result)
 
-    def _try_handle_builtin(self, command: str) -> Optional[str]:
+    def _try_handle_builtin(self, command: str) -> str | None:
         """尝试处理内置命令
 
         Args:
@@ -520,7 +532,7 @@ class ExecutionService(_ExecutionServiceBase):
 
         return None
 
-    def _try_handle_cat_skills(self, command: str) -> Optional[str]:
+    def _try_handle_cat_skills(self, command: str) -> str | None:
         """尝试处理 cat skills/* 命令（缓存优化）
 
         Args:
@@ -542,20 +554,26 @@ class ExecutionService(_ExecutionServiceBase):
 
         return None
 
-    def _handle_toolkit(self, full_command: str, args: list[str]) -> str:
+    def _handle_toolkit(self, _full_command: str, args: list[str]) -> str:
         """处理 toolkit 命令"""
         return self._toolkit_handler.handle(args)
 
-    def _handle_update_prompt(self, full_command: str, args: list[str]) -> str:
+    def _handle_update_prompt(self, full_command: str, _args: list[str]) -> str:
         """处理 update_prompt 命令"""
-        # 提取 update_prompt 之后的所有内容
-        parts = full_command.split(None, 1)
-        if len(parts) > 1:
-            content = parts[1].strip().strip('"\'')
-            return self._update_prompt_file(content)
-        return "错误: update_prompt 需要提供新的提示词内容。"
+        parts = full_command.split(None, 2)
+        if len(parts) < 3:
+            return "错误: update_prompt 需要提供文件名和新的提示词内容。"
 
-    def _handle_todo(self, full_command: str, args: list[str]) -> str:
+        filename = parts[1].strip()
+        content = parts[2].strip()
+        if (content.startswith('"') and content.endswith('"')) or (content.startswith("'") and content.endswith("'")):
+            content = content[1:-1]
+        content = content.strip()
+        if not content:
+            return "错误: update_prompt 需要提供新的提示词内容。"
+        return self._update_prompt_file(filename, content)
+
+    def _handle_todo(self, full_command: str, _args: list[str]) -> str:
         """处理 todo 命令"""
         settings = load_config()
         todo_path = str(settings.get_absolute_path(settings.memory.todo_path))
@@ -572,7 +590,7 @@ class ExecutionService(_ExecutionServiceBase):
 
         return "错误: todo 指令需要提供任务清单内容。"
 
-    def _handle_memory(self, full_command: str, args: list[str]) -> str:
+    def _handle_memory(self, full_command: str, _args: list[str]) -> str:
         """处理 memory 命令"""
         settings = load_config()
 
@@ -601,15 +619,30 @@ class ExecutionService(_ExecutionServiceBase):
 
         return "错误: memory 指令需要提供记忆内容。"
 
-    def _update_prompt_file(self, content: str) -> str:
+    def _update_prompt_file(self, filename: str, content: str) -> str:
         """更新提示词文件"""
+        if not is_supported_prompt_fragment(filename):
+            return "错误: update_prompt 仅支持更新 .alice/prompt 下的已知分片文件。"
+
         settings = load_config()
         prompt_path = settings.get_absolute_path(settings.prompt_path)
+        prompt_dir = prompt_path.parent
+        fragment_path = prompt_dir / filename
 
         try:
-            with open(prompt_path, "w", encoding="utf-8") as f:
-                f.write(content.strip())
-            return f"已成功更新宿主人设文件 ({settings.memory.prompt_path})。新指令将在下一轮对话生效。"
+            prompt_dir.mkdir(parents=True, exist_ok=True)
+            fragment_path.write_text(content.strip() + "\n", encoding="utf-8")
+
+            if self._compose_runtime_prompt_hook is not None:
+                prompt_content = self._compose_runtime_prompt_hook()
+                prompt_path.write_text(prompt_content, encoding="utf-8")
+            else:
+                prompt_content = rebuild_runtime_prompt(prompts_dir=prompt_dir, prompt_path=prompt_path)
+
+            if self._refresh_runtime_prompt_hook is not None:
+                self._refresh_runtime_prompt_hook(prompt_content)
+
+            return f"已成功更新提示词分片 ({fragment_path.relative_to(settings.project_root)})。新指令将在下一轮对话生效。"
         except Exception as e:
             return f"更新人设文件失败: {str(e)}"
 
