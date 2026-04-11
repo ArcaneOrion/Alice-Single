@@ -1,90 +1,54 @@
 # CLAUDE.md
 
-本文件为 Claude Code 在此代码库中工作时提供指导。
+本文件为 Claude Code 在此仓库中的最小工作约束。
 
-`docs/` 是长期知识的统一入口；如遇到根目录历史文档残留，应优先收敛到 `docs/` 对应专题，而不是恢复平行文档。
+原则：`docs/` 是长期知识统一入口；根目录文档只保留导航、启动方式和最小约束，不继续堆主题知识。
 
-> **项目状态**：Alice 已完成从单文件到分层架构的重构。旧入口 (`agent.py`/`tui_bridge.py`) 保留但已由新架构替代。
-
----
+## 先读这些
+- 文档入口：`docs/README.md`
+- 架构总览：`docs/architecture/overview.md`
+- 代码地图：`docs/reference/code-map.md`
+- 耦合视图：`docs/reference/code-map-coupling.md`
+- Bridge 协议：`docs/protocols/bridge.md`
+- 测试指南：`docs/testing/guide.md`
+- 日志专题：`docs/operations/logging/README.md`
 
 ## 最小启动
-
 ```bash
-# 1. 配置运行时 LLM
 ${EDITOR:-vi} .alice/config.json
-# 编辑 llm.api_key / llm.model_name，按需设置 llm.base_url
-
-# 2. 运行（首次启动会自动补齐 `.alice/` 运行时目录，并按需构建 Docker 镜像）
 cd frontend && cargo run --release
 ```
 
-## 常用命令
+首次启动会补齐：
+- `.alice/config.json`
+- `.alice/prompt/*.xml`
+- `.alice/prompt/prompt.xml`
+- `.alice/memory/*`
 
-| 操作 | 命令 |
-|------|------|
-| 构建运行 | `cd frontend && cargo run --release` |
-| 列出/刷新技能 | 在 TUI 中发送 `toolkit list` / `toolkit refresh` |
-| 检查容器 | `docker ps -a --filter name=alice-sandbox-instance` |
-| 同步文档索引 | `/code_map_team` |
-
-**TUI 快捷键**：`Enter` 发送 | `Esc` 中断 | `Ctrl+O` 切换思考侧边栏 | `Ctrl+C` 退出
-
----
-
-## 渐进式阅读
-
-先看这里，再按需下钻，不要把长期知识继续堆回本文件：
-
-- 架构入口：`docs/architecture/overview.md`
-- Bridge 协议与状态流：`docs/protocols/bridge.md`
-- 代码地图与高耦合区域：`docs/reference/code-map.md`
-- 结构化日志专题：`docs/operations/logging/README.md`
-- 测试入口：`docs/testing/guide.md`
-
-适用建议：
-- 需要理解系统分层、依赖方向、跨边界风险时，看 `docs/architecture/overview.md`
-- 需要改消息结构、状态枚举、中断语义时，看 `docs/protocols/bridge.md`
-- 需要定位改动目录或判断联动面时，看 `docs/reference/code-map.md`
-- 需要改日志 schema、字段、路由或校验时，看 `docs/operations/logging/README.md`
-- 需要决定最小验证集或补测方向时，看 `docs/testing/guide.md`
-
----
-
-## 最小测试入口
-
+## 最小验证
 ```bash
-# 后端测试
 python -m pytest backend/tests
-
-# 前端验证
 cd frontend && cargo test
 cd frontend && cargo clippy
 cd frontend && cargo fmt --check
 ```
 
----
-
 ## 最小调试入口
+- TUI 渲染：`frontend/frontend.log`、终端 stderr
+- 流式与任务日志：`.alice/logs/tasks.jsonl`、`alice_runtime.log`
+- 容器状态：`docker ps -a --filter name=alice-sandbox-instance`
+- 技能刷新：在 TUI 中发送 `toolkit refresh`
 
-| 问题 | 排查 |
-|------|------|
-| TUI 渲染 | 检查 `frontend/frontend.log`、终端 stderr |
-| 流式解析 | 检查 `.alice/logs/tasks.jsonl`、`alice_runtime.log` |
-| Docker 执行 | `docker ps -a --filter name=alice-sandbox-instance` |
-| 技能未加载 | 在 TUI 中发送 `toolkit refresh` |
+## 当前关键边界
+1. 当前默认用户配置源是 `.alice/config.json`
+2. 当前运行时 prompt 边界是 `.alice/prompt/*.xml` 与 `.alice/prompt/prompt.xml`，不是旧的 `.alice/prompt.xml`
+3. `backend/alice/cli/main.py` 是当前默认 Python CLI / bridge 入口；`backend/alice/infrastructure/bridge/server.py` 仍是 legacy 兼容边界
+4. 执行后端改动至少联动：`backend/alice/core/registry/command_registry.py`、`backend/alice/application/services/lifecycle_service.py`、`backend/alice/domain/execution/services/execution_service.py`、`backend/alice/domain/execution/executors/`
+5. 结构、协议、日志、测试入口或代码地图导航变更后，运行 `/code_map_team`
 
----
-
-## 重要约束
-
-1. **双入口并存**：`cli/main.py`（新，AliceAgent + WorkflowChain）和 `bridge/server.py`（旧，BridgeServer + MessageHandler）并行存在
-2. **Execution Harness 双路径**：当前默认是 `container` harness（`LocalProcessExecutor`），`docker` 为兼容路径；改执行后端时要联动 `command_registry.py`、`lifecycle_service.py`、`execution_service.py` 与相关测试
-3. **类型重复定义**：`AgentStatus`、`Author`、`Message` 在 Rust app/core/ui 层各有独立定义，通过转换函数互转
-4. **`MessageQueue` 未使用**：已定义但 `App` 直接用 `Vec<Message>`
-5. **`EventBus` 基本空转**：创建后未实际用于事件分发
-6. **安全审查弱**：仅拦截 `rm` 命令
-7. **运行时配置与 Prompt 边界**：`.alice/config.json` 是运行时配置源；`prompts/01_identity.xml` 到 `05_output.xml` 会组装为运行时 `.alice/prompt.xml`
-8. **修改代码后**如影响架构、协议、代码地图、日志或测试入口，请运行 `/code_map_team` 以同步 `docs/` 下的相关文档索引
-
----
+## 工作约束
+- 改代码前先做针对性检查；改完后做同类验证
+- 需要结构定位看 `docs/reference/code-map.md`
+- 需要联动面看 `docs/reference/code-map-coupling.md`
+- 需要判断哪份文档权威，看 `docs/reference/sources-of-truth.md`
+- 如果发现根目录旧说明与 `docs/` 冲突，优先修正到 `docs/`

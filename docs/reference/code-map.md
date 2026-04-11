@@ -1,8 +1,8 @@
 # 代码地图总览
 
-> 同步时间：2026-04-07
+> 同步时间：2026-04-10
 >
-> 同步基线 commit：24e8f03
+> 同步基线 commit：f85ba9c
 >
 > 维护规则：先更新 `docs/reference/*`，再在代码结构、专题导航或高耦合区域变更后同步本页；若结构视图与耦合视图不一致，以实际代码与对应专题文档为准，并尽快回补。
 
@@ -17,8 +17,8 @@
 ## 一级结构
 - `frontend/src/`：Rust TUI，负责界面、交互、事件分发、Bridge 客户端与 stdio 传输。
 - `backend/alice/`：Python 引擎，负责 agent、workflow、memory、tool execution，以及 canonical runtime context / request envelope -> legacy bridge compatibility 输出；当前树里也已包含 gateway/websocket transport 适配层。
-- `backend/alice/cli/bootstrap.py`：CLI runtime scaffold 与启动装配入口，负责补齐 `.alice/config.json`、`.alice/prompt/*.xml`、`.alice/prompt/prompt.xml`、`.alice/memory/*`，并把 `Settings` 装配为 orchestration / lifecycle / workflow。
-- `backend/alice/domain/execution/`：执行域；当前默认通过 `core/registry/command_registry.py` 选择 `container` harness，并装配到 `docker_executor.py` / `DockerExecutionBackend`，`local_process_executor.py` 保留给单进程 runtime 场景。
+- `backend/alice/cli/bootstrap.py`：CLI runtime scaffold 与启动装配入口；通过 `backend/alice/core/prompts.py` 复制仓库 prompt 分片到 `.alice/prompt/*.xml` 并重建 `.alice/prompt/prompt.xml`，同时补齐 `.alice/config.json`、`.alice/memory/*`，再把 `Settings` 装配为 orchestration / lifecycle / workflow。
+- `backend/alice/domain/execution/`：执行域；当前默认通过 `core/registry/command_registry.py` 选择 `container` harness，并装配到 `docker_executor.py` / `DockerExecutionBackend`；同时存在 `local_process_executor.py` / `LocalProcessExecutionBackend` 作为单容器 runtime 内直接本地进程执行路径。
 - `backend/tests/`：后端测试，含 unit / integration / performance。
 - `protocols/`：共享协议与 schema。
 - `.alice/`：运行时配置与产物目录，默认包含唯一运行时配置源 `.alice/config.json`，以及 prompt、memory、logs、workspace 等运行时文件；首次 CLI 启动会幂等补齐该目录，其中仓库 `prompts/01_identity.xml` 到 `prompts/05_output.xml` 会复制到 `.alice/prompt/`，再组装为 `.alice/prompt/prompt.xml`。
@@ -32,7 +32,7 @@
 - Agent 工作流：优先看 `backend/alice/application/workflow/`、`backend/alice/domain/llm/services/`、`backend/alice/application/agent/`。
 - Runtime Context / Request Envelope / Model-visible Context / Tool Binding：优先看 `backend/alice/application/runtime/`、`backend/alice/application/workflow/`、`backend/alice/domain/llm/services/`、`backend/alice/domain/execution/services/`。
 - 配置 / 容器 / 日志：优先看 `backend/alice/core/`（尤其 `config/`、`logging/configure.py`）、`backend/alice/cli/bootstrap.py`、`backend/alice/infrastructure/`、`docs/operations/logging/`。
-- 运行时配置 / Harness / Prompt 组装：优先看 `backend/alice/core/config/`、`backend/alice/core/registry/command_registry.py`、`backend/alice/cli/bootstrap.py`、`backend/alice/application/services/lifecycle_service.py`、`backend/alice/domain/execution/executors/`、`prompts/`。
+- 运行时配置 / Harness / Prompt 组装：优先看 `backend/alice/core/config/`、`backend/alice/core/prompts.py`、`backend/alice/core/registry/command_registry.py`、`backend/alice/cli/bootstrap.py`、`backend/alice/application/services/lifecycle_service.py`、`backend/alice/domain/execution/executors/`、`prompts/`。
 - 技能系统：优先看 `skills/`、`backend/alice/domain/skills/`。
 - 测试补齐：优先看 `backend/tests/` 与对应实现目录；当前最小主回归入口是 `backend/tests/unit/test_domain/test_chat_workflow.py`、`backend/tests/unit/test_domain/test_stream_service.py`、`backend/tests/unit/test_domain/test_chat_service.py`、`backend/tests/integration/test_bridge.py`、`backend/tests/integration/test_logging_e2e.py`。
 

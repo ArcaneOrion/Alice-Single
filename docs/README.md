@@ -68,6 +68,7 @@
 - [测试指南](./testing/guide.md)
 - `backend/alice/core/config/settings.py`
 - `backend/alice/core/config/loader.py`
+- `backend/alice/core/prompts.py`
 - `backend/alice/cli/bootstrap.py`
 - `backend/alice/core/registry/command_registry.py`
 - `backend/alice/application/services/lifecycle_service.py`
