@@ -19,6 +19,9 @@ crossterm = { version = "0.28", optional = true }
 # Unicode 支持
 unicode-width = { version = "0.2", optional = true }
 
+# 系统剪贴板（Wayland 需要 wayland-data-control feature）
+arboard = { version = "3", features = ["wayland-data-control"] }
+
 [features]
 default = ["tui"]
 tui = ["ratatui", "crossterm", "unicode-width", "dep:thiserror"]

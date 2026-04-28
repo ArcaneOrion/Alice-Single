@@ -1,25 +1,24 @@
 //! # 侧边栏组件
 //!
-//! 显示 Alice 的思考过程（thinking 内容），支持自动滚动。
+//! 显示 Alice 的思考过程，支持自动滚动和选区高亮。
 
 use ratatui::{
     Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    text::{Line, Span},
+    widgets::{Block, Borders, List, ListItem, ListState},
 };
 
+use crate::app::selection::SelectionState;
+use crate::core::event::types::UiArea;
 use crate::ui::util::text::format_text_to_lines;
 
 /// 侧边栏配置
 pub struct SidebarConfig {
-    /// 滚动偏移量
     pub scroll_offset: usize,
-    /// 是否自动滚动
     pub auto_scroll: bool,
-    /// 旋转器索引（用于动画）
     pub spinner_index: usize,
-    /// 当前 Agent 状态
     pub is_thinking: bool,
 }
 
@@ -34,7 +33,6 @@ impl Default for SidebarConfig {
     }
 }
 
-/// 获取旋转器字符
 const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 fn get_spinner(index: usize) -> &'static str {
@@ -42,19 +40,16 @@ fn get_spinner(index: usize) -> &'static str {
 }
 
 /// 渲染思考侧边栏
-///
-/// # 参数
-/// * `f` - ratatui Frame
-/// * `area` - 渲染区域
-/// * `thinking_content` - 思考过程内容
-/// * `config` - 侧边栏配置（可变，用于更新滚动状态）
 pub fn render_sidebar(
     f: &mut Frame,
     area: Rect,
     thinking_content: &str,
     config: &mut SidebarConfig,
+    selection: &SelectionState,
+    content_lines_out: &mut Vec<String>,
 ) {
-    // 如果内容为空，显示占位文本
+    content_lines_out.clear();
+
     let display_content = if thinking_content.is_empty() {
         "暂无思考过程..."
     } else {
@@ -63,38 +58,33 @@ pub fn render_sidebar(
 
     let width = area.width.saturating_sub(2) as usize;
 
-    // 构建标题（根据状态显示旋转器）
     let sidebar_title = if config.is_thinking {
         format!(" 💭 {} ", get_spinner(config.spinner_index))
     } else {
         " 💭 ".to_string()
     };
 
-    let style = Style::default()
-        .fg(Color::Gray)
-        .add_modifier(Modifier::ITALIC);
-
-    // 计算内容行数以实现自动滚动
     let lines = format_text_to_lines(display_content, width);
     let total_lines = lines.len();
     let height = area.height.saturating_sub(2) as usize;
 
-    // 更新滚动偏移量
     update_scroll_offset(config, total_lines, height);
 
-    // 渲染侧边栏
-    let thinking_paragraph = Paragraph::new(display_content)
-        .style(style)
-        .wrap(Wrap { trim: true })
-        .scroll((config.scroll_offset as u16, 0))
-        .block(Block::default().title(sidebar_title).borders(Borders::ALL));
+    let mut items: Vec<ListItem> = Vec::new();
+    for (idx, line_text) in lines.iter().enumerate() {
+        let styled_line = build_selectable_sidebar_line(line_text, idx, selection);
+        items.push(ListItem::new(styled_line));
+        content_lines_out.push(line_text.clone());
+    }
 
-    f.render_widget(thinking_paragraph, area);
+    let mut list_state = ListState::default();
+    *list_state.offset_mut() = config.scroll_offset;
+
+    let list = List::new(items).block(Block::default().title(sidebar_title).borders(Borders::ALL));
+
+    f.render_stateful_widget(list, area, &mut list_state);
 }
 
-/// 更新滚动偏移量
-///
-/// 实现与聊天视图相同的自动置底逻辑
 fn update_scroll_offset(config: &mut SidebarConfig, total_lines: usize, height: usize) {
     if config.auto_scroll {
         if total_lines > height {
@@ -103,7 +93,6 @@ fn update_scroll_offset(config: &mut SidebarConfig, total_lines: usize, height: 
             config.scroll_offset = 0;
         }
     } else {
-        // 限制手动滚动范围
         if total_lines > height {
             let max_scroll = total_lines - height;
             if config.scroll_offset > max_scroll {
@@ -117,6 +106,64 @@ fn update_scroll_offset(config: &mut SidebarConfig, total_lines: usize, height: 
     }
 }
 
+const SELECTED_STYLE: Style = Style::new()
+    .bg(Color::DarkGray)
+    .add_modifier(Modifier::REVERSED);
+
+const NORMAL_STYLE: Style = Style::new().fg(Color::Gray).add_modifier(Modifier::ITALIC);
+
+/// 构建带选择高亮的侧边栏文本行。
+fn build_selectable_sidebar_line(
+    line_text: &str,
+    line_idx: usize,
+    selection: &SelectionState,
+) -> Line<'static> {
+    if !selection.has_selection() || selection.area != UiArea::Sidebar {
+        return Line::from(line_text.to_string()).style(NORMAL_STYLE);
+    }
+
+    let (top, bottom) = selection.selection_line_range();
+    if line_idx < top || line_idx > bottom {
+        return Line::from(line_text.to_string()).style(NORMAL_STYLE);
+    }
+
+    let (left_col, right_col) = selection.selection_col_range();
+    let is_first = line_idx == top;
+    let is_last = line_idx == bottom;
+
+    let sel_start = if is_first {
+        crate::app::selection::display_col_to_char_start(line_text, left_col)
+    } else {
+        0
+    };
+    let sel_end = if is_last {
+        crate::app::selection::display_col_to_char_end(line_text, right_col)
+    } else {
+        line_text.len()
+    };
+
+    if sel_start >= sel_end || sel_start >= line_text.len() {
+        return Line::from(line_text.to_string()).style(NORMAL_STYLE);
+    }
+
+    let mut spans: Vec<Span> = Vec::new();
+    if sel_start > 0 {
+        spans.push(Span::styled(
+            line_text[..sel_start].to_string(),
+            NORMAL_STYLE,
+        ));
+    }
+    spans.push(Span::styled(
+        line_text[sel_start..sel_end].to_string(),
+        SELECTED_STYLE,
+    ));
+    if sel_end < line_text.len() {
+        spans.push(Span::styled(line_text[sel_end..].to_string(), NORMAL_STYLE));
+    }
+
+    Line::from(spans)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -124,31 +171,27 @@ mod tests {
     #[test]
     fn test_get_spinner() {
         assert_eq!(get_spinner(0), "⠋");
-        assert_eq!(get_spinner(10), "⠋"); // 循环
+        assert_eq!(get_spinner(10), "⠋");
     }
 
     #[test]
     fn test_scroll_offset_update() {
         let mut config = SidebarConfig::default();
 
-        // 测试自动滚动 - 内容少于高度
         update_scroll_offset(&mut config, 5, 10);
         assert_eq!(config.scroll_offset, 0);
         assert!(config.auto_scroll);
 
-        // 测试自动滚动 - 内容多于高度
         update_scroll_offset(&mut config, 20, 10);
         assert_eq!(config.scroll_offset, 10);
         assert!(config.auto_scroll);
 
-        // 测试手动滚动后恢复
         config.auto_scroll = false;
         config.scroll_offset = 5;
         update_scroll_offset(&mut config, 20, 10);
         assert_eq!(config.scroll_offset, 5);
         assert!(!config.auto_scroll);
 
-        // 超出范围时恢复自动滚动
         config.scroll_offset = 15;
         update_scroll_offset(&mut config, 20, 10);
         assert_eq!(config.scroll_offset, 10);

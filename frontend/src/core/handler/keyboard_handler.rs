@@ -31,6 +31,10 @@ pub enum KeyAction {
     ScrollToTop,
     /// 滚动到底部
     ScrollToBottom,
+    /// 复制选中文本到剪贴板
+    Copy,
+    /// 从剪贴板粘贴文本
+    Paste,
 }
 
 /// 键盘事件处理器
@@ -91,9 +95,33 @@ impl KeyboardHandler {
 
     /// 处理按键代码（crossterm 版本）
     fn handle_key_code(&self, code: CrosstermKeyCode, modifiers: KeyModifiers) -> KeyAction {
-        // Ctrl+C: 退出
-        if code == CrosstermKeyCode::Char('c') && modifiers.contains(KeyModifiers::CONTROL) {
+        // Ctrl+D: 退出
+        if code == CrosstermKeyCode::Char('d') && modifiers.contains(KeyModifiers::CONTROL) {
             return KeyAction::Quit;
+        }
+
+        // Ctrl+Shift+C: 复制
+        if code == CrosstermKeyCode::Char('C')
+            && modifiers.contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT)
+        {
+            return KeyAction::Copy;
+        }
+
+        // Ctrl+C: 复制
+        if code == CrosstermKeyCode::Char('c') && modifiers.contains(KeyModifiers::CONTROL) {
+            return KeyAction::Copy;
+        }
+
+        // Ctrl+Shift+V: 粘贴
+        if code == CrosstermKeyCode::Char('V')
+            && modifiers.contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT)
+        {
+            return KeyAction::Paste;
+        }
+
+        // Ctrl+V: 粘贴
+        if code == CrosstermKeyCode::Char('v') && modifiers.contains(KeyModifiers::CONTROL) {
+            return KeyAction::Paste;
         }
 
         // Ctrl+O: 切换思考侧边栏
@@ -143,9 +171,29 @@ impl KeyboardHandler {
 
     /// 处理按键代码（内部版本）
     fn handle_key_code_inner(&self, code: KeyCode, modifiers: OurKeyModifiers) -> KeyAction {
-        // Ctrl+C: 退出
-        if matches!(code, KeyCode::Char('c')) && modifiers.contains_control() {
+        // Ctrl+D: 退出
+        if matches!(code, KeyCode::Char('d')) && modifiers.contains_control() {
             return KeyAction::Quit;
+        }
+
+        // Ctrl+Shift+C: 复制
+        if matches!(code, KeyCode::Char('C')) && modifiers.contains_control() && modifiers.shift {
+            return KeyAction::Copy;
+        }
+
+        // Ctrl+C: 复制
+        if matches!(code, KeyCode::Char('c')) && modifiers.contains_control() {
+            return KeyAction::Copy;
+        }
+
+        // Ctrl+Shift+V: 粘贴
+        if matches!(code, KeyCode::Char('V')) && modifiers.contains_control() && modifiers.shift {
+            return KeyAction::Paste;
+        }
+
+        // Ctrl+V: 粘贴
+        if matches!(code, KeyCode::Char('v')) && modifiers.contains_control() {
+            return KeyAction::Paste;
         }
 
         // Ctrl+O: 切换思考侧边栏
@@ -262,9 +310,9 @@ mod tests {
     }
 
     #[test]
-    fn test_ctrl_c_quit() {
+    fn test_ctrl_d_quit() {
         let handler = create_handler();
-        let event = KeyEvent::new(CrosstermKeyCode::Char('c'), KeyModifiers::CONTROL);
+        let event = KeyEvent::new(CrosstermKeyCode::Char('d'), KeyModifiers::CONTROL);
         assert_eq!(handler.handle_crossterm_event(event), KeyAction::Quit);
     }
 

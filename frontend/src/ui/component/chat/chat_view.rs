@@ -10,6 +10,8 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState},
 };
 
+use crate::app::selection::SelectionState;
+use crate::core::event::types::UiArea;
 use crate::ui::util::text::format_text_to_lines;
 
 /// 消息作者
@@ -40,18 +42,13 @@ impl Author {
 /// 单条消息结构
 #[derive(Debug, Clone)]
 pub struct Message {
-    /// 消息作者
     pub author: Author,
-    /// 思考过程内容
     pub thinking: String,
-    /// 消息正文
     pub content: String,
-    /// 是否已完成
     pub is_complete: bool,
 }
 
 impl Message {
-    /// 创建新消息
     pub fn new(author: Author, content: String) -> Self {
         Self {
             author,
@@ -61,7 +58,6 @@ impl Message {
         }
     }
 
-    /// 创建空的助手消息（用于流式更新）
     pub fn new_assistant_placeholder() -> Self {
         Self {
             author: Author::Assistant,
@@ -74,11 +70,8 @@ impl Message {
 
 /// 聊天视图配置
 pub struct ChatViewConfig {
-    /// 滚动偏移量
     pub scroll_offset: usize,
-    /// 是否自动滚动
     pub auto_scroll: bool,
-    /// 旋转器索引（用于"正在处理中"动画）
     pub spinner_index: usize,
 }
 
@@ -92,50 +85,105 @@ impl Default for ChatViewConfig {
     }
 }
 
-/// 获取旋转器字符
 const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 fn get_spinner(index: usize) -> &'static str {
     SPINNER[index % SPINNER.len()]
 }
 
-/// 聊天视图状态
 #[derive(Default)]
 pub struct ChatViewState {
-    /// List 状态
     pub list_state: ListState,
 }
 
+/// 选中文本的高亮样式
+const SELECTED_STYLE: Style = Style::new()
+    .bg(Color::DarkGray)
+    .add_modifier(Modifier::REVERSED);
+
+/// 构建带选择高亮的文本行。
+/// 对部分选中的行，用 Span 级别区分选中/未选中的字符。
+/// `expected_area` 用于区分聊天区和侧边栏的选择。
+fn build_selectable_line(
+    line_text: &str,
+    line_idx: usize,
+    selection: &SelectionState,
+    expected_area: crate::core::event::types::UiArea,
+    normal_style: Style,
+) -> Line<'static> {
+    if !selection.has_selection() || selection.area != expected_area {
+        return Line::from(line_text.to_string()).style(normal_style);
+    }
+
+    let (top, bottom) = selection.selection_line_range();
+    if line_idx < top || line_idx > bottom {
+        return Line::from(line_text.to_string()).style(normal_style);
+    }
+
+    let (left_col, right_col) = selection.selection_col_range();
+    let is_first = line_idx == top;
+    let is_last = line_idx == bottom;
+
+    let sel_start = if is_first {
+        crate::app::selection::display_col_to_char_start(line_text, left_col)
+    } else {
+        0
+    };
+    let sel_end = if is_last {
+        crate::app::selection::display_col_to_char_end(line_text, right_col)
+    } else {
+        line_text.len()
+    };
+
+    if sel_start >= sel_end || sel_start >= line_text.len() {
+        return Line::from(line_text.to_string()).style(normal_style);
+    }
+
+    let mut spans: Vec<Span> = Vec::new();
+    if sel_start > 0 {
+        spans.push(Span::styled(
+            line_text[..sel_start].to_string(),
+            normal_style,
+        ));
+    }
+    spans.push(Span::styled(
+        line_text[sel_start..sel_end].to_string(),
+        SELECTED_STYLE,
+    ));
+    if sel_end < line_text.len() {
+        spans.push(Span::styled(line_text[sel_end..].to_string(), normal_style));
+    }
+
+    Line::from(spans)
+}
+
 /// 渲染聊天视图
-///
-/// # 参数
-/// * `f` - ratatui Frame
-/// * `area` - 渲染区域
-/// * `messages` - 消息列表
-/// * `config` - 视图配置（可变，用于更新滚动状态）
-/// * `state` - List 状态（可变，用于渲染）
 pub fn render_chat_view(
     f: &mut Frame,
     area: Rect,
     messages: &[Message],
     config: &mut ChatViewConfig,
     state: &mut ChatViewState,
+    selection: &SelectionState,
+    content_lines_out: &mut Vec<String>,
 ) {
+    content_lines_out.clear();
     let mut message_items = Vec::new();
     let width = area.width.saturating_sub(4) as usize;
+    let mut line_idx: usize = 0;
 
     for msg in messages {
-        // 1. 渲染作者行
         let name = msg.author.display_name();
         let color = msg.author.color();
 
-        message_items.push(ListItem::new(Line::from(vec![Span::styled(
-            name,
-            Style::default().fg(color).add_modifier(Modifier::BOLD),
-        )])));
+        // 作者行
+        let author_style = Style::default().fg(color).add_modifier(Modifier::BOLD);
+        let author_line =
+            build_selectable_line(name, line_idx, selection, UiArea::Chat, author_style);
+        message_items.push(ListItem::new(author_line));
+        content_lines_out.push(name.to_string());
+        line_idx += 1;
 
-        // 2. 渲染正文内容
-        // 思考过程已移至侧边栏，此处不再渲染
         let content_text =
             if msg.content.is_empty() && !msg.is_complete && msg.author == Author::Assistant {
                 format!("{} 正在处理中...", get_spinner(config.spinner_index))
@@ -145,20 +193,26 @@ pub fn render_chat_view(
 
         let content_lines = format_text_to_lines(&content_text, width);
         for line in content_lines {
-            message_items.push(ListItem::new(Line::from(line)));
+            let normal_style = Style::default();
+            let display_line =
+                build_selectable_line(&line, line_idx, selection, UiArea::Chat, normal_style);
+            message_items.push(ListItem::new(display_line));
+            content_lines_out.push(line);
+            line_idx += 1;
         }
 
-        // 3. 添加分隔空行
-        message_items.push(ListItem::new(""));
+        // 空行分隔
+        let empty_line =
+            build_selectable_line("", line_idx, selection, UiArea::Chat, Style::default());
+        message_items.push(ListItem::new(empty_line));
+        content_lines_out.push(String::new());
+        line_idx += 1;
     }
 
-    // 计算滚动位置
     let total_lines = message_items.len();
     let list_height = area.height.saturating_sub(2) as usize;
-
     update_scroll_offset(config, total_lines, list_height);
 
-    // 渲染消息列表
     let history =
         List::new(message_items).block(Block::default().title(" 对话历史 ").borders(Borders::ALL));
 
@@ -166,12 +220,6 @@ pub fn render_chat_view(
     f.render_stateful_widget(history, area, &mut state.list_state);
 }
 
-/// 更新滚动偏移量
-///
-/// 实现自动置底逻辑：
-/// - 如果启用自动滚动，始终保持在最底部
-/// - 如果用户手动滚动，则保持当前位置
-/// - 当滚动超出范围时，恢复自动滚动
 fn update_scroll_offset(config: &mut ChatViewConfig, total_lines: usize, list_height: usize) {
     if config.auto_scroll {
         if total_lines > list_height {
@@ -215,11 +263,9 @@ mod tests {
     fn test_scroll_offset_update() {
         let mut config = ChatViewConfig::default();
 
-        // 测试自动滚动 - 内容少于高度
         update_scroll_offset(&mut config, 5, 10);
         assert_eq!(config.scroll_offset, 0);
 
-        // 测试自动滚动 - 内容多于高度
         update_scroll_offset(&mut config, 20, 10);
         assert_eq!(config.scroll_offset, 10);
     }

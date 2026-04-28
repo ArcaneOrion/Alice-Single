@@ -1,0 +1,20 @@
+[project]
+adr_dir = "doc/arch"
+strict = true
+
+[exemption]
+enabled = true
+allowed_paths = ["README.md", "docs/**", ".github/**", "doc/**"]
+blocked_paths = ["src/**", "lib/**", "core/**", "hooks/**", "scripts/**"]
+allowed_extensions = [".md", ".txt", ".rst", ".gitignore"]
+max_changed_lines = 40
+
+[adr_required]
+code_paths = ["src/**", "lib/**", "core/**", "api/**", "server/**", "backend/**", "frontend/**"]
+doc_only_paths = ["doc/**", "docs/**", ".github/**", "README.md"]
+doc_only_extensions = [".md", ".txt", ".rst"]
+keywords = ["架构", "接口", "行为", "状态机", "breaking", "api", "contract", "跨模块", "跨服务", "invariant", "refactor", "redesign", "protocol", "schema"]
+default_conservative = true
+
+[spec]
+dir = "doc/arch/specs"

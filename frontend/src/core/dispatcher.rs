@@ -207,6 +207,11 @@ impl EventDispatcher {
         self.should_quit
     }
 
+    /// 设置退出标志
+    pub fn set_should_quit(&mut self, value: bool) {
+        self.should_quit = value;
+    }
+
     /// 处理 crossterm 事件（带超时）
     ///
     /// 这是主事件循环的核心方法。它：
@@ -252,23 +257,18 @@ impl EventDispatcher {
             KeyAction::Quit => {
                 self.should_quit = true;
             }
-            KeyAction::ToggleThinking => {
-                // 由外部处理
-            }
-            KeyAction::InputChar(_) | KeyAction::Backspace => {
-                // 由外部处理
-            }
-            KeyAction::SendMessage => {
-                // 由外部处理
-            }
-            KeyAction::Interrupt => {
-                // 由外部处理
-            }
-            KeyAction::ScrollUp | KeyAction::ScrollDown => {
-                // 由外部处理
-            }
-            KeyAction::ScrollToTop | KeyAction::ScrollToBottom => {
-                // 由外部处理
+            KeyAction::ToggleThinking
+            | KeyAction::InputChar(_)
+            | KeyAction::Backspace
+            | KeyAction::SendMessage
+            | KeyAction::Interrupt
+            | KeyAction::ScrollUp
+            | KeyAction::ScrollDown
+            | KeyAction::ScrollToTop
+            | KeyAction::ScrollToBottom
+            | KeyAction::Copy
+            | KeyAction::Paste => {
+                // 由 apply_key_action 处理
             }
             KeyAction::None => {}
         }
@@ -280,14 +280,12 @@ impl EventDispatcher {
             MouseAction::ChatScrollUp
             | MouseAction::ChatScrollDown
             | MouseAction::SidebarScrollUp
-            | MouseAction::SidebarScrollDown => {
-                // 由外部处理
-            }
-            MouseAction::Click { .. } => {
-                // 未来可能用于选择消息等
-            }
-            MouseAction::Drag { .. } => {
-                // 未来可能用于选中文本等
+            | MouseAction::SidebarScrollDown
+            | MouseAction::Click { .. }
+            | MouseAction::Drag { .. }
+            | MouseAction::Move { .. }
+            | MouseAction::Release { .. } => {
+                // 由 apply_mouse_action 处理
             }
             MouseAction::None => {}
         }
@@ -416,6 +414,36 @@ impl EventDispatcher {
                 self.active_scroll_state(app).reset();
             }
             KeyAction::None => {}
+            KeyAction::Copy => {
+                if !app.selection.has_selection() {
+                    return;
+                }
+                let line_texts = match app.selection.area {
+                    crate::core::event::types::UiArea::Chat
+                    | crate::core::event::types::UiArea::Input => app.chat_content_lines.clone(),
+                    crate::core::event::types::UiArea::Sidebar => app.sidebar_content_lines.clone(),
+                    crate::core::event::types::UiArea::None => Vec::new(),
+                };
+                app.selection.extract_text(&line_texts);
+                if let Err(e) = app.selection.copy_to_clipboard() {
+                    runtime_log("dispatcher", "clipboard.error", &format!("copy: {}", e));
+                }
+            }
+            KeyAction::Paste => {
+                match crate::app::selection::SelectionState::paste_from_clipboard() {
+                    Ok(text) => {
+                        runtime_log(
+                            "dispatcher",
+                            "clipboard.paste",
+                            &format!("len={}", text.len()),
+                        );
+                        app.input.push_str(&text);
+                    }
+                    Err(e) => {
+                        runtime_log("dispatcher", "clipboard.error", &format!("paste: {}", e));
+                    }
+                }
+            }
         }
     }
 
@@ -433,8 +461,61 @@ impl EventDispatcher {
             MouseAction::SidebarScrollDown => {
                 app.thinking_scroll.scroll_down();
             }
-            MouseAction::Click { .. } => {}
-            MouseAction::Drag { .. } => {}
+            MouseAction::Click { area, x, y } => {
+                if area != crate::core::event::types::UiArea::None {
+                    let (rect, scroll) = match area {
+                        crate::core::event::types::UiArea::Chat => {
+                            (app.area_bounds.chat_area, app.chat_scroll.offset)
+                        }
+                        crate::core::event::types::UiArea::Sidebar => {
+                            (app.area_bounds.sidebar_area, app.thinking_scroll.offset)
+                        }
+                        crate::core::event::types::UiArea::Input => {
+                            (app.area_bounds.input_area, 0usize)
+                        }
+                        crate::core::event::types::UiArea::None => {
+                            (ratatui::layout::Rect::default(), 0)
+                        }
+                    };
+                    let (line, col) = crate::app::selection::screen_to_content(x, y, rect, scroll);
+                    app.selection.start(area, line, col);
+                } else {
+                    app.selection.clear();
+                }
+            }
+            MouseAction::Drag {
+                area, to_x, to_y, ..
+            }
+            | MouseAction::Move {
+                area,
+                x: to_x,
+                y: to_y,
+            } => {
+                if app.selection.active && app.selection.area == area {
+                    let (rect, scroll) = match area {
+                        crate::core::event::types::UiArea::Chat => {
+                            (app.area_bounds.chat_area, app.chat_scroll.offset)
+                        }
+                        crate::core::event::types::UiArea::Sidebar => {
+                            (app.area_bounds.sidebar_area, app.thinking_scroll.offset)
+                        }
+                        crate::core::event::types::UiArea::Input => {
+                            (app.area_bounds.input_area, 0usize)
+                        }
+                        crate::core::event::types::UiArea::None => {
+                            (ratatui::layout::Rect::default(), 0)
+                        }
+                    };
+                    let (line, col) =
+                        crate::app::selection::screen_to_content(to_x, to_y, rect, scroll);
+                    app.selection.update(line, col);
+                }
+            }
+            MouseAction::Release { .. } => {
+                if app.selection.active {
+                    app.selection.end();
+                }
+            }
             MouseAction::None => {}
         }
     }
@@ -778,7 +859,7 @@ mod tests {
 
         dispatcher.handle_key_event(
             &mut app,
-            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+            KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL),
         );
 
         assert!(app.should_quit);

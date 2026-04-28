@@ -25,7 +25,10 @@
 //! ```
 
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event},
+    event::{
+        self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+        Event,
+    },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -43,6 +46,22 @@ use alice_frontend::core::event::EventBus;
 use alice_frontend::ui::render_app;
 
 use alice_frontend::util::runtime_log::runtime_log;
+
+/// 终端恢复守卫，确保即使 panic 或信号中断也能还原终端状态。
+struct TerminalGuard;
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        disable_raw_mode().ok();
+        execute!(
+            io::stdout(),
+            LeaveAlternateScreen,
+            DisableMouseCapture,
+            DisableBracketedPaste
+        )
+        .ok();
+    }
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     runtime_log("main", "system.start", "phase=frontend.main.start");
@@ -73,7 +92,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 初始化事件分发器
     let mut dispatcher = EventDispatcher::new(event_bus);
 
-    // 初始化终端
+    // 初始化终端（guard 在作用域结束时自动恢复终端）
+    let _guard = TerminalGuard;
     runtime_log("main", "system.start", "phase=raw_mode.init.start");
     enable_raw_mode().map_err(|err| {
         runtime_log(
@@ -84,7 +104,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         err
     })?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture).map_err(|err| {
+    execute!(
+        stdout,
+        EnterAlternateScreen,
+        EnableMouseCapture,
+        EnableBracketedPaste
+    )
+    .map_err(|err| {
         runtime_log(
             "main",
             "bridge.error",
@@ -104,6 +130,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     runtime_log("main", "system.start", "phase=raw_mode.init.ready");
 
     let tick_rate = Duration::from_millis(100);
+    let min_poll = Duration::from_millis(5);
     let mut last_tick = Instant::now();
     let exit_reason: &str;
 
@@ -153,10 +180,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             app.area_bounds.input_area,
         );
 
-        // 处理终端事件
+        // 处理终端事件（保底 5ms 阻塞避免空转漏事件）
         let timeout = tick_rate
             .checked_sub(last_tick.elapsed())
-            .unwrap_or_else(|| Duration::from_secs(0));
+            .unwrap_or(min_poll)
+            .max(min_poll);
 
         if event::poll(timeout).map_err(|err| {
             runtime_log(
@@ -179,6 +207,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 Event::Mouse(mouse) => {
                     dispatcher.handle_mouse_event(&mut app, mouse);
+                }
+                Event::Paste(text) => {
+                    if app.status.can_accept_input() {
+                        app.input.push_str(&text);
+                    }
                 }
                 _ => {}
             }
@@ -203,24 +236,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &format!("phase=frontend.main.exit reason={}", exit_reason),
     );
 
-    // 优雅退出
+    // terminal 恢复由 _guard 的 Drop 完成
     drop(terminal);
-    disable_raw_mode().map_err(|err| {
-        runtime_log(
-            "main",
-            "bridge.error",
-            &format!("phase=raw_mode.disable error={}", err),
-        );
-        err
-    })?;
-    execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture).map_err(|err| {
-        runtime_log(
-            "main",
-            "bridge.error",
-            &format!("phase=terminal.leave_alternate_screen error={}", err),
-        );
-        err
-    })?;
+
     runtime_log("main", "system.shutdown", "phase=frontend.main.done");
 
     Ok(())

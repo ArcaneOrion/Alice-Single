@@ -17,10 +17,12 @@
 
 pub mod constants;
 pub mod message_queue;
+pub mod selection;
 pub mod state;
 
 // 重新导出常用类型
 pub use message_queue::{MessageQueue, MessageQueueConfig, MessageQueueStats};
+pub use selection::SelectionState;
 pub use state::{AgentStatus, App, AreaBounds, Author, Message, TokenStats};
 
 // 导出常量

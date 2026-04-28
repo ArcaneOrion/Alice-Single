@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 use crate::bridge::BridgeClient;
 use crate::core::event::types::ScrollState;
 
+use super::selection::SelectionState;
+
 /// 消息作者
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub enum Author {
@@ -158,6 +160,12 @@ pub struct App {
     pub area_bounds: AreaBounds,
     /// 桥接客户端（用于与 Python 后端通信）
     pub bridge_client: BridgeClient,
+    /// 文字选择状态
+    pub selection: SelectionState,
+    /// 聊天区内容行（用于文字提取）
+    pub chat_content_lines: Vec<String>,
+    /// 侧边栏内容行（用于文字提取）
+    pub sidebar_content_lines: Vec<String>,
 }
 
 /// UI 区域边界信息
@@ -191,6 +199,9 @@ impl App {
             list_state: ListState::default(),
             area_bounds: AreaBounds::default(),
             bridge_client,
+            selection: SelectionState::default(),
+            chat_content_lines: Vec::new(),
+            sidebar_content_lines: Vec::new(),
         }
     }
 

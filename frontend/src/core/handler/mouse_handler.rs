@@ -33,6 +33,10 @@ pub enum MouseAction {
         to_x: u16,
         to_y: u16,
     },
+    /// 鼠标移动事件（某些终端用 Moved 替代 Drag）
+    Move { area: UiArea, x: u16, y: u16 },
+    /// 鼠标释放事件（结束选择）
+    Release { area: UiArea, x: u16, y: u16 },
 }
 
 /// 鼠标事件处理器
@@ -96,7 +100,41 @@ impl MouseHandler {
             },
 
             // 点击
-            CrosstermMouseEventKind::Down(_) => MouseAction::Click { area, x, y },
+            CrosstermMouseEventKind::Down(button) => {
+                if button == crossterm::event::MouseButton::Left {
+                    MouseAction::Click { area, x, y }
+                } else {
+                    MouseAction::None
+                }
+            }
+
+            // 拖拽（仅左键）
+            CrosstermMouseEventKind::Drag(button) => {
+                if button == crossterm::event::MouseButton::Left {
+                    MouseAction::Drag {
+                        area,
+                        from_x: 0,
+                        from_y: 0,
+                        to_x: x,
+                        to_y: y,
+                    }
+                } else {
+                    MouseAction::None
+                }
+            }
+
+            // 某些终端用 Moved 替代 Drag（mode 1003 / 不标准的行为）
+            // 将其作为潜在的拖拽事件，由 apply_mouse_action 检查 active 状态
+            CrosstermMouseEventKind::Moved => MouseAction::Move { area, x, y },
+
+            // 松开（仅左键）
+            CrosstermMouseEventKind::Up(button) => {
+                if button == crossterm::event::MouseButton::Left {
+                    MouseAction::Release { area, x, y }
+                } else {
+                    MouseAction::None
+                }
+            }
 
             _ => MouseAction::None,
         }

@@ -71,6 +71,8 @@ pub fn render_app(f: &mut Frame, app: &mut App) {
         &messages,
         &mut chat_config,
         &mut chat_state,
+        &app.selection,
+        &mut app.chat_content_lines,
     );
     app.chat_scroll.offset = chat_config.scroll_offset;
     app.chat_scroll.auto_scroll = chat_config.auto_scroll;
@@ -89,6 +91,8 @@ pub fn render_app(f: &mut Frame, app: &mut App) {
             layout.sidebar_area,
             &thinking_content,
             &mut sidebar_config,
+            &app.selection,
+            &mut app.sidebar_content_lines,
         );
         app.thinking_scroll.offset = sidebar_config.scroll_offset;
         app.thinking_scroll.auto_scroll = sidebar_config.auto_scroll;
