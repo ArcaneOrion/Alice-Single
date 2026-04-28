@@ -74,24 +74,6 @@ class HarnessConfig:
 
 
 @dataclass
-class DockerConfig:
-    """Docker 配置"""
-
-    image_name: str = "alice-sandbox:latest"
-    container_name: str = "alice-sandbox-instance"
-    work_dir: str = "/app"
-    dockerfile_path: str = "Dockerfile.sandbox"
-    mounts: dict[str, str] = field(
-        default_factory=lambda: {
-            "skills": "/app/skills",
-            ".alice": "/app/.alice",
-            ".alice/workspace": "/workspace",
-        }
-    )
-    timeout: int = 120
-
-
-@dataclass
 class LoggingConfig:
     """日志配置"""
 
@@ -145,7 +127,6 @@ class Settings:
     workflow: WorkflowConfig = field(default_factory=WorkflowConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     harness: HarnessConfig = field(default_factory=HarnessConfig)
-    docker: DockerConfig = field(default_factory=DockerConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     bridge: BridgeConfig = field(default_factory=BridgeConfig)
     security: SecurityConfig = field(default_factory=SecurityConfig)

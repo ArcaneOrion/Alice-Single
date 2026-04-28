@@ -8,10 +8,11 @@ from .settings import (
     Settings,
     LLMConfig,
     MemoryConfig,
-    DockerConfig,
     LoggingConfig,
     BridgeConfig,
     SecurityConfig,
+    HarnessConfig,
+    WorkflowConfig,
 )
 from .loader import ConfigLoader, load_config
 
@@ -19,10 +20,11 @@ __all__ = [
     "Settings",
     "LLMConfig",
     "MemoryConfig",
-    "DockerConfig",
     "LoggingConfig",
     "BridgeConfig",
     "SecurityConfig",
+    "HarnessConfig",
+    "WorkflowConfig",
     "ConfigLoader",
     "load_config",
 ]

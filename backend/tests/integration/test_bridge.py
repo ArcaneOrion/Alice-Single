@@ -22,10 +22,12 @@ from backend.alice.application.dto.responses import (
     StatusResponse,
     StructuredRuntimeOutput,
     TokensResponse,
-    response_to_dict,
 )
 from backend.alice.application.dto.responses import (
     StatusType as ResponseStatusType,
+)
+from backend.alice.infrastructure.bridge.legacy_compatibility_serializer import (
+    response_to_dict,
 )
 from backend.alice.cli.main import TUIBridge
 from backend.alice.core.config.settings import LoggingConfig

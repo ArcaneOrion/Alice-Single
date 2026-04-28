@@ -7,13 +7,13 @@
 from __future__ import annotations
 
 import logging
-from importlib import import_module
 from pathlib import Path
 from typing import Any, Optional
 
-RuntimeContextBuilder = import_module(
-    "backend.alice.application.runtime"
-).RuntimeContextBuilder
+from backend.alice.application.runtime import RuntimeContextBuilder
+from backend.alice.application.workflow.function_calling_orchestrator import (
+    FunctionCallingOrchestrator,
+)
 from backend.alice.core.config.settings import Settings
 from backend.alice.core.registry import (
     ProviderCreateOptions,
@@ -169,10 +169,7 @@ class OrchestrationService:
             max_history=max_history,
         )
         stream_service = StreamService(provider=llm_provider)
-        function_calling_orchestrator_cls = import_module(
-            "backend.alice.application.workflow.function_calling_orchestrator"
-        ).FunctionCallingOrchestrator
-        function_calling_orchestrator = function_calling_orchestrator_cls(
+        function_calling_orchestrator = FunctionCallingOrchestrator(
             execution_service=execution_service,
             tool_registry=tool_registry,
         )

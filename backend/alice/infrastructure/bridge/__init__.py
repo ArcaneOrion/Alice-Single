@@ -2,14 +2,9 @@
 Bridge Infrastructure Module
 
 TUI (Rust) 与 Agent (Python) 之间的桥接层。
-通过 stdin/stdout 传递 JSON Lines 格式消息。
 
-模块结构：
-- protocol: 消息定义和编解码器
-- transport: 传输层抽象和实现
-- event_handlers: 事件处理器
-- server: 桥接服务器
-- stream_manager: 流式数据管理器
+当前活跃路径：legacy_compatibility_serializer + protocol/messages + transport
+已废弃路径：server (BridgeServer) + event_handlers + stream_manager
 """
 
 from .server import (

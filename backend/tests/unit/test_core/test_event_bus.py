@@ -4,6 +4,8 @@
 测试 EventBus 的发布-订阅功能、通配符订阅、过滤器等
 """
 
+from unittest.mock import Mock
+
 import pytest
 
 from backend.alice.core.event_bus import (
@@ -61,8 +63,8 @@ class TestEventBusBasics:
     def test_multiple_subscribers(self):
         """测试多个订阅者"""
         bus = EventBus()
-        handler1 = pytest.mock.Mock()
-        handler2 = pytest.mock.Mock()
+        handler1 = Mock()
+        handler2 = Mock()
 
         bus.subscribe(EventType.LLM_START, handler1)
         bus.subscribe(EventType.LLM_START, handler2)
@@ -75,8 +77,8 @@ class TestEventBusBasics:
     def test_different_event_types(self):
         """测试不同事件类型"""
         bus = EventBus()
-        llm_handler = pytest.mock.Mock()
-        exec_handler = pytest.mock.Mock()
+        llm_handler = Mock()
+        exec_handler = Mock()
 
         bus.subscribe(EventType.LLM_START, llm_handler)
         bus.subscribe(EventType.EXEC_START, exec_handler)
@@ -118,7 +120,7 @@ class TestWildcardSubscription:
     def test_wildcard_receives_all_events(self):
         """测试通配符接收所有事件"""
         bus = EventBus()
-        handler = pytest.mock.Mock()
+        handler = Mock()
 
         bus.subscribe_wildcard(handler)
 
@@ -131,7 +133,7 @@ class TestWildcardSubscription:
     def test_wildcard_unsubscribe(self):
         """测试取消通配符订阅"""
         bus = EventBus()
-        handler = pytest.mock.Mock()
+        handler = Mock()
 
         unsubscribe = bus.subscribe_wildcard(handler)
         bus.publish(Event(type=EventType.LLM_START))
@@ -144,8 +146,8 @@ class TestWildcardSubscription:
     def test_wildcard_and_specific_subscription(self):
         """测试通配符和特定订阅同时工作"""
         bus = EventBus()
-        wildcard_handler = pytest.mock.Mock()
-        specific_handler = pytest.mock.Mock()
+        wildcard_handler = Mock()
+        specific_handler = Mock()
 
         bus.subscribe_wildcard(wildcard_handler)
         bus.subscribe(EventType.LLM_START, specific_handler)
@@ -167,7 +169,7 @@ class TestEventFilter:
     def test_filter_with_function(self):
         """测试函数过滤器"""
         bus = EventBus()
-        handler = pytest.mock.Mock()
+        handler = Mock()
 
         def filter_func(event):
             return event.data.get("priority") == "high"
@@ -189,7 +191,7 @@ class TestEventFilter:
     def test_wildcard_with_filter(self):
         """测试通配符订阅带过滤器"""
         bus = EventBus()
-        handler = pytest.mock.Mock()
+        handler = Mock()
 
         bus.subscribe_wildcard(
             handler,
@@ -212,7 +214,7 @@ class TestOnceSubscription:
     def test_once_subscription_fires_only_once(self):
         """测试一次性订阅只触发一次"""
         bus = EventBus()
-        handler = pytest.mock.Mock()
+        handler = Mock()
 
         bus.subscribe(EventType.LLM_START, handler, once=True)
 
@@ -225,7 +227,7 @@ class TestOnceSubscription:
     def test_once_subscription_removed_after_fire(self):
         """测试一次性订阅触发后移除"""
         bus = EventBus()
-        handler = pytest.mock.Mock()
+        handler = Mock()
 
         bus.subscribe(EventType.LLM_START, handler, once=True)
         bus.publish(Event(type=EventType.LLM_START))
@@ -243,7 +245,7 @@ class TestSpecificEventTypes:
     def test_llm_start_event(self):
         """测试 LLM 开始事件"""
         bus = EventBus()
-        handler = pytest.mock.Mock()
+        handler = Mock()
 
         bus.subscribe(EventType.LLM_START, handler)
 
@@ -259,7 +261,7 @@ class TestSpecificEventTypes:
     def test_exec_complete_event(self):
         """测试执行完成事件"""
         bus = EventBus()
-        handler = pytest.mock.Mock()
+        handler = Mock()
 
         bus.subscribe(EventType.EXEC_COMPLETE, handler)
 
@@ -291,7 +293,7 @@ class TestErrorHandling:
         def failing_handler(event):
             raise RuntimeError("Handler failed")
 
-        working_handler = pytest.mock.Mock()
+        working_handler = Mock()
 
         bus.subscribe(EventType.LLM_START, failing_handler)
         bus.subscribe(EventType.LLM_START, working_handler)
@@ -313,9 +315,9 @@ class TestSubscriberCount:
     def test_get_subscriber_count_for_type(self):
         """测试获取特定类型的订阅者数量"""
         bus = EventBus()
-        bus.subscribe(EventType.LLM_START, pytest.mock.Mock())
-        bus.subscribe(EventType.LLM_START, pytest.mock.Mock())
-        bus.subscribe(EventType.EXEC_START, pytest.mock.Mock())
+        bus.subscribe(EventType.LLM_START, Mock())
+        bus.subscribe(EventType.LLM_START, Mock())
+        bus.subscribe(EventType.EXEC_START, Mock())
 
         assert bus.get_subscriber_count(EventType.LLM_START) == 2
         assert bus.get_subscriber_count(EventType.EXEC_START) == 1
@@ -323,16 +325,16 @@ class TestSubscriberCount:
     def test_get_wildcard_subscriber_count(self):
         """测试获取通配符订阅者数量"""
         bus = EventBus()
-        bus.subscribe_wildcard(pytest.mock.Mock())
-        bus.subscribe_wildcard(pytest.mock.Mock())
+        bus.subscribe_wildcard(Mock())
+        bus.subscribe_wildcard(Mock())
 
         assert bus.get_subscriber_count(None) == 2
 
     def test_clear_removes_all_subscriptions(self):
         """测试清除所有订阅"""
         bus = EventBus()
-        bus.subscribe(EventType.LLM_START, pytest.mock.Mock())
-        bus.subscribe_wildcard(pytest.mock.Mock())
+        bus.subscribe(EventType.LLM_START, Mock())
+        bus.subscribe_wildcard(Mock())
 
         bus.clear()
 
@@ -352,7 +354,7 @@ class TestThreadSafety:
         import threading
 
         bus = EventBus()
-        handler = pytest.mock.Mock()
+        handler = Mock()
         bus.subscribe(EventType.LLM_START, handler)
 
         def publish_events():

@@ -241,6 +241,11 @@ def serialize_application_response(response: Any) -> dict[str, Any] | None:
     return serialized
 
 
+def response_to_dict(response: Any) -> dict[str, Any] | None:
+    """将 ApplicationResponse 投影为 legacy bridge dict。"""
+    return serialize_application_response(response)
+
+
 __all__ = [
     "serialize_status_message",
     "serialize_thinking_message",
@@ -250,4 +255,5 @@ __all__ = [
     "serialize_canonical_event",
     "serialize_runtime_event_response",
     "serialize_application_response",
+    "response_to_dict",
 ]

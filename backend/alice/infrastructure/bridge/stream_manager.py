@@ -1,13 +1,22 @@
 """
-Stream Manager
+Stream Manager (DEPRECATED)
 
-流式数据管理器，使用滑动窗口预判代码块状态，确保 UI 分流精确。
-从 tui_bridge.py 的 StreamManager 重构而来。
+.. deprecated::
+   流式数据管理器，使用滑动窗口预判代码块状态。
+   从 tui_bridge.py 的 StreamManager 重构而来。
+   当前由 domain/llm/parsers/stream_parser.py 接管流式解析职责。
 """
 
 import logging
 import re
+import warnings
 from typing import Optional
+
+warnings.warn(
+    "bridge/stream_manager.py 已废弃，流式解析请使用 domain/llm/parsers/stream_parser.py",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 from .protocol.messages import OutputMessage
 

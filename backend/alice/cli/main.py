@@ -30,13 +30,13 @@ def _prepare_process_environment() -> None:
 
 
 from backend.alice.application.agent import AliceAgent
-from backend.alice.application.dto import response_to_dict
 from backend.alice.cli.bootstrap import (
     configure_runtime_logging,
     create_agent_from_env,
     ensure_runtime_scaffold,
 )
 from backend.alice.infrastructure.bridge.legacy_compatibility_serializer import (
+    response_to_dict,
     serialize_error_message,
     serialize_status_message,
 )

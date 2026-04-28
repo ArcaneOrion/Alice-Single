@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any
 
 from .settings import (
-    DockerConfig,
     HarnessConfig,
     LLMConfig,
     LoggingConfig,
@@ -63,7 +62,6 @@ class ConfigLoader:
         settings.workflow = self._parse_workflow_config(data.get("workflow", {}), settings.workflow)
         settings.memory = self._parse_memory_config(data.get("memory", {}), settings.memory)
         settings.harness = self._parse_harness_config(data.get("harness", {}), settings.harness)
-        settings.docker = self._parse_docker_config(data.get("docker", {}), settings.docker)
         settings.logging = self._parse_logging_config(data.get("logging", {}), settings.logging)
         if output_dir := data.get("output_dir"):
             settings.output_dir = output_dir
@@ -115,16 +113,6 @@ class ConfigLoader:
             skill_source_name=data.get("skill_source_name", defaults.skill_source_name),
         )
 
-    def _parse_docker_config(self, data: dict[str, Any], defaults: DockerConfig) -> DockerConfig:
-        return DockerConfig(
-            image_name=data.get("image_name", defaults.image_name),
-            container_name=data.get("container_name", defaults.container_name),
-            work_dir=data.get("work_dir", defaults.work_dir),
-            dockerfile_path=data.get("dockerfile_path", defaults.dockerfile_path),
-            mounts=data.get("mounts", defaults.mounts),
-            timeout=data.get("timeout", defaults.timeout),
-        )
-
     def _parse_logging_config(self, data: dict[str, Any], defaults: LoggingConfig) -> LoggingConfig:
         return LoggingConfig(
             level=data.get("level", defaults.level),
@@ -171,7 +159,6 @@ def build_default_config_data(config_path: str | None = None) -> dict[str, Any]:
         "workflow": asdict(settings.workflow),
         "memory": asdict(settings.memory),
         "harness": asdict(settings.harness),
-        "docker": asdict(settings.docker),
         "logging": asdict(settings.logging),
         "skills_dir": settings.skills_dir,
         "output_dir": settings.output_dir,

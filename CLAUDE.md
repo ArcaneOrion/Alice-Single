@@ -2,17 +2,6 @@
 
 本文件为 Claude Code 在此仓库中的最小工作约束。
 
-原则：`docs/` 是长期知识统一入口；根目录文档只保留导航、启动方式和最小约束，不继续堆主题知识。
-
-## 先读这些
-- 文档入口：`docs/README.md`
-- 架构总览：`docs/architecture/overview.md`
-- 代码地图：`docs/reference/code-map.md`
-- 耦合视图：`docs/reference/code-map-coupling.md`
-- Bridge 协议：`docs/protocols/bridge.md`
-- 测试指南：`docs/testing/guide.md`
-- 日志专题：`docs/operations/logging/README.md`
-
 ## 最小启动
 ```bash
 ${EDITOR:-vi} .alice/config.json
@@ -33,22 +22,41 @@ cd frontend && cargo clippy
 cd frontend && cargo fmt --check
 ```
 
-## 最小调试入口
+## 调试入口
 - TUI 渲染：`frontend/frontend.log`、终端 stderr
 - 流式与任务日志：`.alice/logs/tasks.jsonl`、`alice_runtime.log`
 - 容器状态：`docker ps -a --filter name=alice-sandbox-instance`
 - 技能刷新：在 TUI 中发送 `toolkit refresh`
 
-## 当前关键边界
-1. 当前默认用户配置源是 `.alice/config.json`
-2. 当前运行时 prompt 边界是 `.alice/prompt/*.xml` 与 `.alice/prompt/prompt.xml`，不是旧的 `.alice/prompt.xml`
-3. `backend/alice/cli/main.py` 是当前默认 Python CLI / bridge 入口；`backend/alice/infrastructure/bridge/server.py` 仍是 legacy 兼容边界
-4. 执行后端改动至少联动：`backend/alice/core/registry/command_registry.py`、`backend/alice/application/services/lifecycle_service.py`、`backend/alice/domain/execution/services/execution_service.py`、`backend/alice/domain/execution/executors/`
-5. 结构、协议、日志、测试入口或代码地图导航变更后，运行 `/code_map_team`
+## 关键边界
+1. 默认用户配置源是 `.alice/config.json`
+2. 运行时 prompt 边界是 `.alice/prompt/*.xml` 与 `.alice/prompt/prompt.xml`
+3. `backend/alice/cli/main.py` 是默认 Python CLI / bridge 入口
+4. `backend/alice/infrastructure/bridge/server.py` 已废弃（legacy）
+5. 执行后端改动至少联动：`command_registry.py`、`lifecycle_service.py`、`execution_service.py`、`executors/`
+
+## 分层约束
+```text
+application/ → domain/       (业务规则)
+             → infrastructure/ (外部系统适配)
+             → core/          (共享框架能力)
+
+domain/      → core/
+infrastructure/ → core/
+```
+
+- 业务规则进入 `domain/`
+- 编排和请求流程进入 `application/`
+- 外部系统、IO、协议适配进入 `infrastructure/`
+- 可复用框架能力进入 `core/`
+
+## 高联动区域
+- **Bridge 协议**：改字段/状态/中断语义至少联调 frontend 和 backend
+- **执行后端**：改 executor 联调 `command_registry`、`lifecycle_service`、`execution_service`
+- **Agent 工作流**：`chat_workflow.py` ↔ `chat_service.py` ↔ `stream_service.py` ↔ `function_calling_orchestrator.py`
+- **配置系统**：改 Settings 字段联调 `loader.py`、`bootstrap.py`、`orchestration_service.py`
 
 ## 工作约束
 - 改代码前先做针对性检查；改完后做同类验证
-- 需要结构定位看 `docs/reference/code-map.md`
-- 需要联动面看 `docs/reference/code-map-coupling.md`
-- 需要判断哪份文档权威，看 `docs/reference/sources-of-truth.md`
-- 如果发现根目录旧说明与 `docs/` 冲突，优先修正到 `docs/`
+- 不要跨层直连
+- 新增能力优先扩展现有包，不创建新的顶层杂项目录

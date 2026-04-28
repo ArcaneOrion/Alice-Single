@@ -46,7 +46,7 @@ def _summarize_text(text: str, limit: int = 120) -> str:
 
 def _serialize_response(response: Any) -> dict[str, Any] | None:
     """惰性导入 DTO 序列化函数，避免 bridge 初始化环。"""
-    from backend.alice.application.dto.responses import response_to_dict
+    from ..legacy_compatibility_serializer import response_to_dict
 
     return response_to_dict(response)
 

@@ -15,6 +15,15 @@ from .event import Event, EventType
 from .handler_trait import EventHandler, EventHandlerFunc, EventFilter
 
 
+def _apply_filter(
+    filter_obj: EventFilter | Callable[[Event], bool], event: Event
+) -> bool:
+    """应用事件过滤器，兼容 EventFilter 协议和普通 callable。"""
+    if hasattr(filter_obj, "should_handle"):
+        return bool(filter_obj.should_handle(event))
+    return bool(filter_obj(event))
+
+
 @dataclass
 class Subscription:
     """订阅信息"""
@@ -186,21 +195,19 @@ class EventBus:
     def _execute_handler(self, subscription: Subscription, event: Event) -> None:
         """执行事件处理器"""
         try:
-            # 检查过滤器
             if subscription.filter is not None:
-                if not subscription.filter.should_handle(event):
+                if not _apply_filter(subscription.filter, event):
                     return
 
             subscription.handler(event)
         except Exception as e:
-            # 记录错误但不中断其他处理器
             self._handle_error(e, event, subscription.handler)
 
     async def _aexecute_handler(self, subscription: Subscription, event: Event) -> None:
         """异步执行事件处理器"""
         try:
             if subscription.filter is not None:
-                if not subscription.filter.should_handle(event):
+                if not _apply_filter(subscription.filter, event):
                     return
 
             handler = subscription.handler

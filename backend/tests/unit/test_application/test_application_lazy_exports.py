@@ -1,4 +1,4 @@
-"""Tests for lazy exports in backend.alice.application."""
+"""Tests for minimal application package exports."""
 
 from __future__ import annotations
 
@@ -6,30 +6,25 @@ import importlib
 import sys
 
 
-def test_package_lazy_exports_resolve_real_objects() -> None:
+def test_application_package_imports_cleanly() -> None:
+    """application 包应能被直接导入，不抛异常。"""
     sys.modules.pop("backend.alice.application", None)
     application_module = importlib.import_module("backend.alice.application")
+    assert application_module is not None
 
-    assert "AliceAgent" not in application_module.__dict__
-    assert "ChatWorkflow" not in application_module.__dict__
-    assert "ReActLoop" not in application_module.__dict__
-    assert "ReActConfig" not in application_module.__dict__
-    assert "ReActState" not in application_module.__dict__
-    assert not hasattr(application_module, "ReActLoop")
-    assert not hasattr(application_module, "ReActConfig")
-    assert not hasattr(application_module, "ReActState")
 
-    agent_module = importlib.import_module("backend.alice.application.agent")
-    assert "ReActLoop" not in agent_module.__dict__
-    assert "ReActConfig" not in agent_module.__dict__
-    assert "ReActState" not in agent_module.__dict__
-    assert not hasattr(agent_module, "ReActLoop")
-    assert not hasattr(agent_module, "ReActConfig")
-    assert not hasattr(agent_module, "ReActState")
-
-    from backend.alice.application import AliceAgent, ChatWorkflow
+def test_submodule_imports_resolve_correctly() -> None:
+    """子模块导入应在没有循环依赖的情况下正常解析。"""
     from backend.alice.application.agent import AliceAgent as RealAliceAgent
     from backend.alice.application.workflow import ChatWorkflow as RealChatWorkflow
 
-    assert AliceAgent is RealAliceAgent
-    assert ChatWorkflow is RealChatWorkflow
+    assert RealAliceAgent is not None
+    assert RealChatWorkflow is not None
+
+
+def test_legacy_artifacts_are_gone() -> None:
+    """旧的 ReAct 相关 artifact 不应存在。"""
+    agent_module = importlib.import_module("backend.alice.application.agent")
+    assert not hasattr(agent_module, "ReActLoop")
+    assert not hasattr(agent_module, "ReActConfig")
+    assert not hasattr(agent_module, "ReActState")

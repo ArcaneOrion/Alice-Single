@@ -1,15 +1,24 @@
 """
-Bridge Server
+Bridge Server (DEPRECATED)
 
-兼容桥接服务器，协调传输层、协议层和事件处理器。
-当前职责是作为 legacy bridge 协议的兼容入口薄壳。
+.. deprecated::
+   当前默认运行链路是 cli/main.py → agent.py → chat_workflow.py →
+   dto/responses.py → legacy_compatibility_serializer.py。
+   此模块是 legacy 兼容路径，不再扩展功能。
 """
 
 import json
 import logging
 import os
 import traceback
+import warnings
 from typing import TYPE_CHECKING, Any, Optional
+
+warnings.warn(
+    "bridge.server 模块已废弃，当前默认入口是 cli/main.py",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 from .legacy_compatibility_serializer import (
     serialize_error_message,

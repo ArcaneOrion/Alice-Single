@@ -305,20 +305,6 @@ class AgentStatus:
     skills_count: int = 0
 
 
-def application_response_to_legacy_dict(response: ApplicationResponse) -> dict[str, Any] | None:
-    """统一通过 compatibility serializer 投影到 legacy bridge 输出。"""
-    from backend.alice.infrastructure.bridge.legacy_compatibility_serializer import (
-        serialize_application_response,
-    )
-
-    return serialize_application_response(response)
-
-
-def response_to_dict(response: ApplicationResponse) -> dict[str, Any] | None:
-    """将响应转换为 legacy bridge 字典（用于 JSON 序列化）"""
-    return application_response_to_legacy_dict(response)
-
-
 __all__ = [
     "ResponseType",
     "StatusType",
@@ -338,5 +324,4 @@ __all__ = [
     "ApplicationResponse",
     "ChatResult",
     "AgentStatus",
-    "response_to_dict",
 ]
