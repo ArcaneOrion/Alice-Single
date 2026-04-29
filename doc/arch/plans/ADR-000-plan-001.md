@@ -2,7 +2,7 @@
 
 - **ADR**: ADR-000
 - **ADR Title**: 采用 ADR 方法论
-- **Stage**: validate
+- **Stage**: close
 - **Created At**: 2026-04-28T13:20:22
 - **Summary**: 前端 TUI 增加文字选择和复制功能
 
@@ -72,12 +72,14 @@ cargo test: 101 passed (100 lib + 1 doctest) | cargo clippy: 0 errors 0 warnings
 
 ## Closure Summary
 
-待补充
+前端 TUI 新增文字拖拽选择与系统剪贴板复制粘贴功能，覆盖聊天历史/思考侧边栏/输入框三个区域，通过 arboard crate 访问系统剪贴板
+
 
 ## References
 
-- **Commits**: 待补充
-- **Plan**: 待补充
+- **Commits**: 待从 git 自动采集
+- **Plan**: doc/arch/plans/ADR-000-plan-001.md
+
 
 ## Risks and Rollback
 
