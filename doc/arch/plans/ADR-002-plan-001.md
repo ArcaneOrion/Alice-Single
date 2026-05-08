@@ -2,7 +2,7 @@
 
 - **ADR**: ADR-002
 - **ADR Title**: 支持双目录 skill 加载：内置 skills 与用户自定义 skills 分离
-- **Stage**: validate
+- **Stage**: close
 - **Created At**: 2026-05-06T21:51:03
 - **Summary**: 实现双目录 skill 加载：仓库保留 skill-creator 作为官方 skill，其余迁移至 .alice/skills/ 作为用户自定义技能
 
@@ -72,12 +72,14 @@ pytest backend/tests: 295 passed, 4 warnings。双目录加载验证通过：Dir
 
 ## Closure Summary
 
-待补充
+双目录 skill 加载已实现：1. Settings 新增 skills_user_dir = '.alice/skills'，与 skills_dir 并列双目录。2. DirectorySkillLoader/CacheSkillLoader/FileRepository 全部改为 skills_dirs: list 多目录遍历、同名后覆盖。3. DockerConfig 新增 .alice/skills/ 挂载，ContainerManager 确认目录创建。4. 仓库仅保留 skill-creator 内置 skill（~900行），其余 17 个 skill（~200文件，~71k行）从 git 删除。5. pytest 295 passed 基线保持不变。6. 验证：双目录加载 19 skills（1内置+18用户），覆盖行为正确。Commits: a1d00ee [ADR-001] 目录前置迁移, 54b8c0b [ADR-002] 双目录实现。
+
 
 ## References
 
-- **Commits**: 待补充
-- **Plan**: 待补充
+- **Commits**: 待从 git 自动采集
+- **Plan**: doc/arch/plans/ADR-002-plan-001.md
+
 
 ## Risks and Rollback
 
