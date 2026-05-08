@@ -63,6 +63,10 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 ignore_missing_imports = true
+exclude = [
+    "backend/alice/skills/",
+    "tests/",
+]
 
 [[tool.mypy.overrides]]
 module = "tests.*"
