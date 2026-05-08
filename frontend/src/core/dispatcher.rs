@@ -72,13 +72,13 @@ pub fn is_actionable_stderr_error(line: &str) -> bool {
         && trimmed.as_bytes()[7] == b'-'
         && trimmed[..4].chars().all(|c| c.is_ascii_digit())
     {
-        // It's a Python log line — only actionable if ERROR/CRITICAL/Traceback
-        return trimmed.contains("[ERROR]")
-            || trimmed.contains("[CRITICAL]")
-            || trimmed.contains("Traceback");
+        // Only FATAL/CRITICAL level log lines are actionable in TUI.
+        // ERROR/Traceback go to runtime_log only to avoid polluting the UI.
+        return trimmed.contains("[FATAL]")
+            || trimmed.contains("[CRITICAL]");
     }
 
-    // Non-Python-log stderr content (e.g. direct print to stderr) is always actionable
+    // Non-Python-log stderr content (e.g., interpreter crash, segfault) is always actionable
     true
 }
 
@@ -126,7 +126,7 @@ pub fn drain_bridge_messages(app: &mut App, dispatcher: &mut EventDispatcher) ->
         match msg_result {
             Ok(msg) => dispatcher.handle_bridge_message(app, msg),
             Err(err) => {
-                dispatcher.handle_bridge_error(app, format!("Backend connection lost: {}", err));
+                dispatcher.handle_bridge_error(app, format!("Backend connection lost: {}", err), Some("fatal".to_string()));
                 app.should_quit = true;
                 dispatcher.should_quit = true;
                 return false;
@@ -333,8 +333,8 @@ impl EventDispatcher {
             } => {
                 app.tokens.update(total, prompt, completion);
             }
-            BridgeMessage::Error { content } => {
-                self.handle_bridge_error(app, content);
+            BridgeMessage::Error { content, code } => {
+                self.handle_bridge_error(app, content, code);
             }
             BridgeMessage::Interrupt => {}
         }
@@ -343,9 +343,9 @@ impl EventDispatcher {
     }
 
     /// 处理来自后端桥接的错误
-    pub fn handle_bridge_error(&mut self, app: &mut App, err: String) {
+    pub fn handle_bridge_error(&mut self, app: &mut App, err: String, code: Option<String>) {
         app.mark_current_complete();
-        app.add_error(err.clone());
+        app.add_error(err.clone(), code);
         app.set_idle();
         self.set_state(AppState::Idle);
         runtime_log("dispatcher", "bridge.error", &format!("summary={}", err));
@@ -772,6 +772,7 @@ mod tests {
             &mut app,
             BridgeMessage::Error {
                 content: "boom".into(),
+                code: None,
             },
         );
 

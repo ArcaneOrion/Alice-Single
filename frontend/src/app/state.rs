@@ -270,12 +270,17 @@ impl App {
         }
     }
 
-    /// 添加错误消息
-    pub fn add_error(&mut self, content: String) {
+    /// 添加错误消息，根据错误码分级展示
+    pub fn add_error(&mut self, content: String, code: Option<String>) {
+        let prefix = match code.as_deref() {
+            Some("fatal") => "FATAL ",
+            Some("warn") => "WARN ",
+            _ => "ERROR ",
+        };
         self.messages.push(Message {
             author: Author::Assistant,
             thinking: String::new(),
-            content: format!("⚠️ {}", content),
+            content: format!("{} {}", prefix, content),
             is_complete: true,
         });
     }

@@ -56,7 +56,7 @@ fn summarize_bridge_message(msg: &BridgeMessage) -> (&'static str, String) {
                 total, prompt, completion
             ),
         ),
-        BridgeMessage::Error { content } => ("error", summarize_text(content, 120)),
+        BridgeMessage::Error { content, code: _ } => ("error", summarize_text(content, 120)),
         BridgeMessage::Interrupt => ("interrupt", "__INTERRUPT__".to_string()),
     }
 }

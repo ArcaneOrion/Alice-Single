@@ -42,6 +42,11 @@ from backend.alice.infrastructure.bridge.legacy_compatibility_serializer import 
 )
 from backend.alice.infrastructure.bridge.protocol.messages import INTERRUPT_SIGNAL
 
+# 错误码常量 —— 与 Rust BridgeMessage::Error.code 对应
+ERROR_FATAL = "fatal"        # 会话无法继续
+ERROR_RECOVERABLE = "error"  # 当前请求失败，session 存活
+ERROR_WARN = "warn"          # 警告，不影响功能
+
 logger = logging.getLogger("AliceCLI")
 
 
@@ -91,7 +96,7 @@ class TUIBridge:
         except Exception as e:
             error_msg = f"初始化失败: {traceback.format_exc()}"
             logger.error(error_msg)
-            self._send_error(f"Initialization failed: {str(e)}")
+            self._send_error(f"Initialization failed: {str(e)}", code=ERROR_FATAL)
             return False
 
     def run(self):
@@ -124,7 +129,7 @@ class TUIBridge:
             except Exception as e:
                 error_trace = traceback.format_exc()
                 logger.error(f"TUI Bridge 运行时异常:\n{error_trace}")
-                self._send_error(f"Runtime Error: {str(e)}. 请查看日志输出。")
+                self._send_error(f"Runtime Error: {str(e)}. 请查看日志输出。", code=ERROR_FATAL)
                 break
 
         if self.agent:
@@ -138,12 +143,12 @@ class TUIBridge:
             self._process_user_input(message)
         except Exception as e:
             logger.error(f"TUI Bridge 回调处理异常: {e}", exc_info=True)
-            self._send_error(f"Error: {str(e)}")
+            self._send_error(f"Error: {str(e)}", code=ERROR_RECOVERABLE)
 
     def _process_user_input(self, user_input: str):
         """处理用户输入"""
         if self.agent is None:
-            self._send_error("Agent not initialized")
+            self._send_error("Agent not initialized", code=ERROR_RECOVERABLE)
             return
 
         agent = self.agent
@@ -174,7 +179,7 @@ class TUIBridge:
 
         except Exception as e:
             logger.error(f"处理用户输入时发生错误: {e}", exc_info=True)
-            self._send_error(f"Processing error: {str(e)}")
+            self._send_error(f"Processing error: {str(e)}", code=ERROR_RECOVERABLE)
 
     def _send_response(self, response):
         """发送响应到 TUI"""

@@ -48,7 +48,11 @@ pub enum BridgeMessage {
     },
 
     /// 错误消息
-    Error { content: String },
+    Error {
+        content: String,
+        #[serde(default)]
+        code: Option<String>,
+    },
 
     /// 中断信号 (前端 → 后端)
     Interrupt,

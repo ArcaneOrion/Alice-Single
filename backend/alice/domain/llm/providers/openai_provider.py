@@ -497,7 +497,7 @@ class OpenAIProvider(BaseLLMProvider):
                 timing={"latency_ms": latency_ms},
                 level=logging.ERROR,
                 message="api.error",
-                exc_info=True,
+                exc_info=logger.isEnabledFor(logging.DEBUG),
             )
             raise
         finally:
@@ -534,7 +534,7 @@ class OpenAIProvider(BaseLLMProvider):
                 error=build_error_payload(e),
                 level=logging.ERROR,
                 message="api.error",
-                exc_info=True,
+                exc_info=logger.isEnabledFor(logging.DEBUG),
             )
             raise
         finally:

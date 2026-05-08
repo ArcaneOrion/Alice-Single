@@ -155,7 +155,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "bridge.error",
                     &format!("phase=event_loop.backend_error summary={}", err),
                 );
-                dispatcher.handle_bridge_error(&mut app, err);
+                dispatcher.handle_bridge_error(&mut app, err, None);
             } else {
                 runtime_log(
                     "main",

@@ -915,8 +915,11 @@ class TestDualEntryFailureParity:
 
         new_entry_agent.chat.assert_called_once_with("hello")
         old_entry_agent.chat.assert_called_once_with("hello")
-        assert new_entry_messages == [serialize_error_message(content="Processing error: boom")]
-        assert old_entry_transport.sent_messages == new_entry_messages
+        assert new_entry_messages == [serialize_error_message(content="Processing error: boom", code="error")]
+        # 新入口追加了 code 字段，旧入口不变；均为合法向后兼容输出
+        assert old_entry_transport.sent_messages == [serialize_error_message(content="Processing error: boom")]
+        # 确认两者的 content 一致，code 是增量字段
+        assert new_entry_messages[0]["content"] == old_entry_transport.sent_messages[0]["content"]
 
     def test_tui_bridge_run_callback_failure_matches_legacy_on_message_received_error(self, capsys):
         with patch.object(TUIBridge, "_start_stdin_reader", return_value=None):
@@ -947,7 +950,8 @@ class TestDualEntryFailureParity:
             old_entry_server._on_message_received("hello")
 
         assert old_entry_transport.sent_messages == [serialize_error_message(content="Error: boom")]
-        assert new_entry_errors == old_entry_transport.sent_messages
+        # 新入口追加了 code 字段，调整 parity 比较
+        assert new_entry_errors == [serialize_error_message(content="Error: boom", code="error")]
 
     def test_tui_bridge_run_callback_failure_emits_callback_level_legacy_error(self, capsys):
         with patch.object(TUIBridge, "_start_stdin_reader", return_value=None):
@@ -964,7 +968,7 @@ class TestDualEntryFailureParity:
 
         assert stdout_messages == [
             serialize_status_message("ready"),
-            serialize_error_message(content="Error: boom"),
+            serialize_error_message(content="Error: boom", code="error"),
         ]
 
     def test_tui_bridge_run_continues_after_callback_failure(self, capsys):
@@ -991,7 +995,7 @@ class TestDualEntryFailureParity:
         assert processed_messages == ["first", "second"]
         assert stdout_messages == [
             serialize_status_message("ready"),
-            serialize_error_message(content="Error: boom"),
+            serialize_error_message(content="Error: boom", code="error"),
         ]
 
 

@@ -174,7 +174,7 @@ impl BridgeClient {
     pub fn try_recv_message(&self) -> Option<Result<BridgeMessage, BridgeError>> {
         match self.message_rx.try_recv() {
             Ok(msg) => {
-                if let BridgeMessage::Error { content } = &msg {
+                if let BridgeMessage::Error { content, code: _ } = &msg {
                     runtime_log(
                         "bridge.client",
                         "bridge.error",
