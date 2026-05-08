@@ -6,7 +6,6 @@ Docker 配置数据类
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
 
 
 @dataclass(frozen=True)
@@ -44,7 +43,7 @@ class ContainerConfig:
     name: str = "alice-sandbox-instance"
     work_dir: str = "/app"
     restart_policy: str = "always"
-    keep_alive_command: List[str] = field(default_factory=lambda: ["tail", "-f", "/dev/null"])
+    keep_alive_command: list[str] = field(default_factory=lambda: ["tail", "-f", "/dev/null"])
 
     @property
     def restart_policy_spec(self) -> str:
@@ -68,7 +67,7 @@ class DockerConfig:
     """
 
     image_name: str = "alice-sandbox:latest"
-    dockerfile_path: str = "Dockerfile.sandbox"
+    dockerfile_path: str = "docker/Dockerfile.sandbox"
     project_root: Path = field(default_factory=lambda: Path.cwd())
     container: ContainerConfig = field(default_factory=ContainerConfig)
 
@@ -78,19 +77,25 @@ class DockerConfig:
         return self.project_root / self.dockerfile_path
 
     @property
-    def default_mounts(self) -> List[MountConfig]:
+    def default_mounts(self) -> list[MountConfig]:
         """获取默认挂载配置
 
         同步技能库、.alice 运行时目录和输出目录。
         """
-        skills_path = self.project_root / "skills"
+        builtin_skills_path = self.project_root / "backend" / "alice" / "skills"
+        user_skills_path = self.project_root / ".alice" / "skills"
         runtime_path = self.project_root / ".alice"
         output_path = self.project_root / ".alice" / "workspace"
 
         return [
             MountConfig(
-                host_path=skills_path,
+                host_path=builtin_skills_path,
                 container_path="/app/skills",
+                read_only=False,
+            ),
+            MountConfig(
+                host_path=user_skills_path,
+                container_path="/app/user_skills",
                 read_only=False,
             ),
             MountConfig(

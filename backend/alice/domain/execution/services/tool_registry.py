@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from ...skills.services.skill_registry import SkillRegistry
 from ..models import (
     ToolArgumentValidationError,
     ToolCategory,
@@ -12,7 +13,6 @@ from ..models import (
     ToolSchemaDefinition,
     UnknownToolError,
 )
-from ...skills.services.skill_registry import SkillRegistry
 
 
 class ToolRegistry:
@@ -182,11 +182,11 @@ class ToolRegistry:
                 tool_id="skills.read_file",
                 category=ToolCategory.SKILLS,
                 display_name="skills.read_file",
-                description="读取 skills/ 目录下的技能文件快照。",
+                description="读取技能文件快照（内置 skills + 用户 .alice/skills/）。",
                 input_schema={
                     "type": "object",
                     "properties": {
-                        "relative_path": {"type": "string", "description": "相对于 skills/ 的路径"}
+                        "relative_path": {"type": "string", "description": "技能文件相对路径"}
                     },
                     "required": ["relative_path"],
                     "additionalProperties": False,

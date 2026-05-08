@@ -6,13 +6,16 @@
 
 from __future__ import annotations
 
-from typing import Dict, Optional, List, Any
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from abc import ABC, abstractmethod
+from typing import Any
+
+from backend.alice.domain.skills.services.skill_registry import (
+    SkillRegistry as RuntimeSkillRegistry,
+)
 
 from ..interfaces.skill_loader import SkillSourceFactory
-from backend.alice.domain.skills.services.skill_registry import SkillRegistry as RuntimeSkillRegistry
 
 
 @dataclass
@@ -24,8 +27,8 @@ class SkillSpec:
     path: Path
     version: str = "1.0.0"
     license: str = ""
-    allowed_tools: List[str] = field(default_factory=list)
-    metadata: Dict = field(default_factory=dict)
+    allowed_tools: list[str] = field(default_factory=list)
+    metadata: dict = field(default_factory=dict)
     content: str = ""  # SKILL.md 内容
 
     def __post_init__(self):
@@ -55,17 +58,17 @@ class SkillRegistry(ABC):
         ...
 
     @abstractmethod
-    def get(self, name: str) -> Optional[SkillSpec]:
+    def get(self, name: str) -> SkillSpec | None:
         """获取技能规范"""
         ...
 
     @abstractmethod
-    def list_all(self) -> List[SkillSpec]:
+    def list_all(self) -> list[SkillSpec]:
         """列出所有技能"""
         ...
 
     @abstractmethod
-    def search(self, query: str) -> List[SkillSpec]:
+    def search(self, query: str) -> list[SkillSpec]:
         """搜索技能"""
         ...
 
@@ -75,7 +78,7 @@ class SkillRegistry(ABC):
         ...
 
     @abstractmethod
-    def get_source(self, name: str) -> Optional[SkillSourceSpec]:
+    def get_source(self, name: str) -> SkillSourceSpec | None:
         """获取运行时技能来源。"""
         ...
 
@@ -89,12 +92,17 @@ class InMemorySkillRegistry(SkillRegistry):
     """内存技能注册表实现"""
 
     def __init__(self):
-        self._skills: Dict[str, SkillSpec] = {}
-        self._sources: Dict[str, SkillSourceSpec] = {}
+        self._skills: dict[str, SkillSpec] = {}
+        self._sources: dict[str, SkillSourceSpec] = {}
         self.register_source(
             SkillSourceSpec(
                 name="default",
-                factory=lambda **_kwargs: RuntimeSkillRegistry(),
+                factory=lambda skills_dirs=None, project_root=None, **_: RuntimeSkillRegistry(
+                    skills_dirs=skills_dirs or [
+                        str((project_root or Path(".")) / "backend/alice/skills"),
+                        str((project_root or Path(".")) / ".alice/skills"),
+                    ]
+                ),
                 description="默认运行时技能注册表",
             )
         )
@@ -108,15 +116,15 @@ class InMemorySkillRegistry(SkillRegistry):
         if name in self._skills:
             del self._skills[name]
 
-    def get(self, name: str) -> Optional[SkillSpec]:
+    def get(self, name: str) -> SkillSpec | None:
         """获取技能规范"""
         return self._skills.get(name)
 
-    def list_all(self) -> List[SkillSpec]:
+    def list_all(self) -> list[SkillSpec]:
         """列出所有技能"""
         return list(self._skills.values())
 
-    def search(self, query: str) -> List[SkillSpec]:
+    def search(self, query: str) -> list[SkillSpec]:
         """搜索技能"""
         query_lower = query.lower()
         results = []
@@ -129,7 +137,7 @@ class InMemorySkillRegistry(SkillRegistry):
         """注册运行时技能来源。"""
         self._sources[spec.name] = spec
 
-    def get_source(self, name: str) -> Optional[SkillSourceSpec]:
+    def get_source(self, name: str) -> SkillSourceSpec | None:
         """获取运行时技能来源。"""
         return self._sources.get(name)
 
@@ -143,7 +151,7 @@ class InMemorySkillRegistry(SkillRegistry):
             raise TypeError("技能来源工厂必须返回 domain SkillRegistry")
         return runtime_registry
 
-    def get_skill_content(self, name: str) -> Optional[str]:
+    def get_skill_content(self, name: str) -> str | None:
         """获取技能内容"""
         spec = self.get(name)
         return spec.content if spec else None
@@ -212,13 +220,18 @@ class InMemorySkillRegistry(SkillRegistry):
         self.register_source(
             SkillSourceSpec(
                 name="default",
-                factory=lambda **_kwargs: RuntimeSkillRegistry(),
+                factory=lambda skills_dirs=None, project_root=None, **_: RuntimeSkillRegistry(
+                    skills_dirs=skills_dirs or [
+                        str((project_root or Path(".")) / "backend/alice/skills"),
+                        str((project_root or Path(".")) / ".alice/skills"),
+                    ]
+                ),
                 description="默认运行时技能注册表",
             )
         )
 
 
-_global_skill_registry: Optional[InMemorySkillRegistry] = None
+_global_skill_registry: InMemorySkillRegistry | None = None
 
 
 def get_skill_registry() -> InMemorySkillRegistry:

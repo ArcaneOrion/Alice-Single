@@ -11,9 +11,10 @@
 ├── backend/tests/     # 后端测试
 ├── protocols/         # 跨语言协议与 schema
 ├── prompts/           # 仓库 prompt 模板分片
-├── skills/            # 技能目录
+├── backend/alice/skills/ # 技能目录（运行时能力模块）
 ├── .alice/            # 本地运行时配置、prompt、memory、logs、workspace
-└── Dockerfile.sandbox # 运行时镜像定义
+├── docker/             # Docker 镜像定义
+│   └── Dockerfile.sandbox  # 运行时沙盒镜像
 ```
 
 ## 最小启动

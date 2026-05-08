@@ -27,6 +27,8 @@ _(尚无 ADR。运行 `/spec-vc adr-new "<title>"` 创建第一条,或运行 `/s
 | 编号 | 标题 | 状态 | 日期 |
 |------|------|------|------|
 | ADR-000 | 采用 ADR 方法论 | Accepted | 2026-04-28 |
+| ADR-001 | 目录结构重组：skills 归入后端包、Dockerfile 建 docker/ 目录收容 | Accepted | 2026-05-06 |
+| ADR-002 | 支持双目录 skill 加载：内置 skills 与用户自定义 skills 分离 | Proposed | 2026-05-06 |
 
 ## 状态图例
 

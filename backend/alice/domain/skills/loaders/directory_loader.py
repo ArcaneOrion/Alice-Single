@@ -4,13 +4,12 @@
 从目录中扫描并加载技能。
 """
 
-import os
 import logging
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
 
-from .base import BaseSkillLoader
 from ..models import Skill, SkillMetadata
+from .base import BaseSkillLoader
 
 logger = logging.getLogger(__name__)
 
@@ -22,13 +21,16 @@ class DirectorySkillLoader(BaseSkillLoader):
     并将其注册为技能。
     """
 
-    def __init__(self, skills_dir: str | Path = "skills"):
+    def __init__(self, skills_dirs: str | Path | Sequence[str | Path] = "backend/alice/skills"):
         """初始化加载器
 
         Args:
-            skills_dir: 技能目录路径
+            skills_dirs: 技能目录路径，可以是单个路径或路径列表
         """
-        self.skills_dir = Path(skills_dir)
+        if isinstance(skills_dirs, (str, Path)):
+            self.skills_dirs = [Path(skills_dirs)]
+        else:
+            self.skills_dirs = [Path(d) for d in skills_dirs]
         self._skills: dict[str, Skill] = {}
 
     def load(self, path: Path) -> Skill | None:
@@ -53,7 +55,7 @@ class DirectorySkillLoader(BaseSkillLoader):
             return None
 
         try:
-            with open(skill_md, 'r', encoding='utf-8', errors='ignore') as f:
+            with open(skill_md, encoding='utf-8', errors='ignore') as f:
                 content = f.read()
         except Exception as e:
             logger.error(f"读取技能文件失败 {skill_md}: {e}")
@@ -89,32 +91,33 @@ class DirectorySkillLoader(BaseSkillLoader):
         """加载目录中的所有技能
 
         Args:
-            directory: 要扫描的目录，默认使用初始化时的 skills_dir
+            directory: 要扫描的目录，默认遍历所有 skills_dirs
 
         Returns:
-            技能名称到技能对象的字典
+            技能名称到技能对象的字典（后加载的覆盖先加载的同名技能）
         """
-        target_dir = Path(directory) if directory else self.skills_dir
-
-        if not target_dir.exists():
-            logger.warning(f"技能目录不存在: {target_dir}")
-            return {}
+        target_dirs = [Path(directory)] if directory else self.skills_dirs
 
         skills: dict[str, Skill] = {}
 
-        for item in sorted(target_dir.iterdir()):
-            if not item.is_dir():
+        for target_dir in target_dirs:
+            if not target_dir.exists():
+                logger.warning(f"技能目录不存在: {target_dir}")
                 continue
 
-            skill_md = item / "SKILL.md"
-            if not skill_md.exists():
-                continue
+            for item in sorted(target_dir.iterdir()):
+                if not item.is_dir():
+                    continue
 
-            skill = self.load(skill_md)
-            if skill:
-                skills[skill.name] = skill
+                skill_md = item / "SKILL.md"
+                if not skill_md.exists():
+                    continue
 
-        logger.info(f"从 {target_dir} 加载了 {len(skills)} 个技能")
+                skill = self.load(skill_md)
+                if skill:
+                    skills[skill.name] = skill
+
+            logger.info(f"从 {target_dir} 加载了 {len(skills)} 个技能")
         return skills
 
     def refresh(self) -> None:

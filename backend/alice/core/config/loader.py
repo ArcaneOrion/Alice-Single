@@ -67,6 +67,8 @@ class ConfigLoader:
             settings.output_dir = output_dir
         if skills_dir := data.get("skills_dir"):
             settings.skills_dir = skills_dir
+        if skills_user_dir := data.get("skills_user_dir"):
+            settings.skills_user_dir = skills_user_dir
         return settings
 
     def _parse_llm_config(self, data: dict[str, Any], defaults: LLMConfig) -> LLMConfig:
@@ -161,6 +163,7 @@ def build_default_config_data(config_path: str | None = None) -> dict[str, Any]:
         "harness": asdict(settings.harness),
         "logging": asdict(settings.logging),
         "skills_dir": settings.skills_dir,
+        "skills_user_dir": settings.skills_user_dir,
         "output_dir": settings.output_dir,
     }
 

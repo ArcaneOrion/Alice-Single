@@ -47,7 +47,7 @@ class ToolkitCommandHandler:
 
         skills = self.snapshot_manager.skills
         if not skills:
-            return "当前未注册任何技能。请确保 `skills/` 目录下有正确的 `SKILL.md` 文件。"
+            return "当前未注册任何技能。请确保 `backend/alice/skills/` 目录下有正确的 `SKILL.md` 文件。"
 
         skill_list = []
         for name, data in sorted(skills.items()):

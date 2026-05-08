@@ -1,5 +1,5 @@
 <tools>
-<rule>调用技能前，先读取对应 skills/&lt;skill&gt;/SKILL.md，避免凭印象使用。</rule>
+<rule>调用技能前，先读取对应 SKILL.md（内置: /app/skills/&lt;skill&gt;/SKILL.md，用户: /app/user_skills/&lt;skill&gt;/SKILL.md），避免凭印象使用。</rule>
 <rule>容器内执行保持相对路径。</rule>
 <rule>产出文件默认写到 `/workspace/`；它对应宿主机 `.alice/workspace/`。</rule>
 <rule>如发现现有人设或流程明显缺陷，可用 update_prompt 自我修正。</rule>
@@ -10,7 +10,8 @@
 
 目录映射：
 - `/workspace/` → 宿主机 `.alice/workspace/`（工作产出写到这里，用户在宿主机直接可见）
-- `/app/skills/` → 宿主机 `skills/`（技能库，只读参考）
+- `/app/skills/` → 宿主机 `backend/alice/skills/`（内置技能库，可读写）
+- `/app/user_skills/` → 宿主机 `.alice/skills/`（用户自定义技能库，可读写）
 - `/app/.alice/` → 宿主机 `.alice/`（运行时配置与记忆）
 
 当前工作目录是 `/app`。

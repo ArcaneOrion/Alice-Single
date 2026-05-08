@@ -5,13 +5,11 @@
 """
 
 import re
-import time
-import os
+from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Protocol
-from abc import ABC, abstractmethod
 
-from ..models import Skill, SkillMetadata
+from ..models import Skill
 
 
 class SkillLoader(Protocol):
@@ -92,9 +90,7 @@ class BaseSkillLoader(ABC):
                 if value.startswith('[') and value.endswith(']'):
                     value = [v.strip().strip('"\'') for v in value[1:-1].split(',')]
                 # 去除引号
-                elif value.startswith('"') and value.endswith('"'):
-                    value = value[1:-1]
-                elif value.startswith("'") and value.endswith("'"):
+                elif value.startswith('"') and value.endswith('"') or value.startswith("'") and value.endswith("'"):
                     value = value[1:-1]
 
                 # 处理连字符命名的 key

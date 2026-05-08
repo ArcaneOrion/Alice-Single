@@ -5,6 +5,7 @@
 """
 
 import logging
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -20,13 +21,23 @@ class SkillCache:
     提供简洁的缓存操作接口。
     """
 
-    def __init__(self, loader: CacheSkillLoader | None = None):
+    def __init__(
+        self,
+        loader: CacheSkillLoader | None = None,
+        skills_dirs: Sequence[str | Path] | None = None,
+    ):
         """初始化缓存管理器
 
         Args:
             loader: 技能加载器实例，如果为 None 则创建默认实例
+            skills_dirs: 技能目录路径列表，用于创建默认加载器
         """
-        self.loader = loader or CacheSkillLoader()
+        if loader is not None:
+            self.loader = loader
+        elif skills_dirs is not None:
+            self.loader = CacheSkillLoader(skills_dirs)
+        else:
+            self.loader = CacheSkillLoader("backend/alice/skills")
 
     def read_skill_file(self, relative_path: str) -> str | None:
         """读取技能文件内容（带缓存）
@@ -73,8 +84,11 @@ class SkillCache:
             如果文件已缓存返回 True
         """
         stats = self.get_cache_stats()
-        full_path = str(self.loader.skills_dir / relative_path)
-        return full_path in stats.get("cache_keys", [])
+        for skills_dir in self.loader.skills_dirs:
+            full_path = str(skills_dir / relative_path)
+            if full_path in stats.get("cache_keys", []):
+                return True
+        return False
 
 
 __all__ = ["SkillCache"]

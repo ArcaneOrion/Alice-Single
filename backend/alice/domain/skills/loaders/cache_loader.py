@@ -4,15 +4,15 @@
 提供带 mtime 验证的技能文件缓存读取功能。
 """
 
-import os
-import time
 import logging
-from dataclasses import dataclass, field
+import os
+from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .directory_loader import DirectorySkillLoader
 from ..models import Skill
+from .directory_loader import DirectorySkillLoader
 
 logger = logging.getLogger(__name__)
 
@@ -38,13 +38,13 @@ class CacheSkillLoader(DirectorySkillLoader):
     性能提升：100-300ms (docker exec) → <10ms (缓存命中)
     """
 
-    def __init__(self, skills_dir: str | Path = "skills"):
+    def __init__(self, skills_dirs: str | Path | Sequence[str | Path] = "backend/alice/skills"):
         """初始化缓存加载器
 
         Args:
-            skills_dir: 技能目录路径
+            skills_dirs: 技能目录路径，可以是单个路径或路径列表
         """
-        super().__init__(skills_dir)
+        super().__init__(skills_dirs)
         self._content_cache: dict[str, CacheEntry] = {}
 
     def read_skill_file(self, relative_path: str) -> str | None:
@@ -56,40 +56,46 @@ class CacheSkillLoader(DirectorySkillLoader):
         Returns:
             文件内容字符串，如果文件不存在返回 None
         """
-        full_path = self.skills_dir / relative_path
-        full_path_str = str(full_path)
+        # 按 skills_dirs 顺序查找文件，先找到的为准
+        for skills_dir in self.skills_dirs:
+            full_path = skills_dir / relative_path
+            full_path_str = str(full_path)
 
-        # 获取当前文件的修改时间
-        try:
-            current_mtime = os.path.getmtime(full_path)
-        except FileNotFoundError:
-            return None
-        except Exception as e:
-            logger.error(f"获取文件 mtime 失败 {full_path}: {e}")
-            return None
+            if not full_path.exists():
+                continue
 
-        # 检查缓存是否有效
-        cached = self._content_cache.get(full_path_str)
-        if cached and cached.mtime == current_mtime:
-            # 缓存命中且 mtime 未变，直接返回
-            logger.debug(f"缓存命中: {relative_path}")
-            return cached.content
+            # 获取当前文件的修改时间
+            try:
+                current_mtime = os.path.getmtime(full_path)
+            except Exception as e:
+                logger.error(f"获取文件 mtime 失败 {full_path}: {e}")
+                continue
 
-        # 缓存失效或未命中，从磁盘重新加载
-        try:
-            with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
-                content = f.read()
+            # 检查缓存是否有效
+            cached = self._content_cache.get(full_path_str)
+            if cached and cached.mtime == current_mtime:
+                # 缓存命中且 mtime 未变，直接返回
+                logger.debug(f"缓存命中: {relative_path}")
+                return cached.content
 
-            # 更新缓存
-            self._content_cache[full_path_str] = CacheEntry(
-                content=content,
-                mtime=current_mtime
-            )
-            logger.debug(f"缓存更新: {relative_path}")
-            return content
-        except Exception as e:
-            logger.error(f"读取文件失败 {full_path}: {e}")
-            return None
+            # 缓存失效或未命中，从磁盘重新加载
+            try:
+                with open(full_path, encoding='utf-8', errors='ignore') as f:
+                    content = f.read()
+
+                # 更新缓存
+                self._content_cache[full_path_str] = CacheEntry(
+                    content=content,
+                    mtime=current_mtime
+                )
+                logger.debug(f"缓存更新: {relative_path}")
+                return content
+            except Exception as e:
+                logger.error(f"读取文件失败 {full_path}: {e}")
+                continue
+
+        # 所有目录都未找到
+        return None
 
     def load(self, path: Path) -> Skill | None:
         """加载单个技能（带缓存）"""

@@ -133,8 +133,14 @@ class Settings:
 
     project_root: Path = field(default_factory=lambda: Path.cwd())
     config_path: str = ".alice/config.json"
-    skills_dir: str = "skills"
+    skills_dir: str = "backend/alice/skills"
+    skills_user_dir: str = ".alice/skills"
     output_dir: str = ".alice/workspace"
+
+    @property
+    def skills_dirs(self) -> list[str]:
+        """返回所有 skill 目录路径（内置 + 用户自定义）。"""
+        return [self.skills_dir, self.skills_user_dir]
 
     @property
     def prompt_path(self) -> str:

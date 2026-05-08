@@ -66,4 +66,8 @@ def test_create_from_settings_forwards_runtime_config() -> None:
         "skill_source_name": "repo-skills",
         "harness_name": "docker",
         "max_history": 77,
+        "skills_dirs": [
+            "/tmp/alice-project/backend/alice/skills",
+            "/tmp/alice-project/.alice/skills",
+        ],
     }

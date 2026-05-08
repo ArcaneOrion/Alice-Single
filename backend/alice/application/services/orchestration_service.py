@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from backend.alice.application.runtime import RuntimeContextBuilder
 from backend.alice.application.workflow.function_calling_orchestrator import (
@@ -21,16 +21,15 @@ from backend.alice.core.registry import (
     get_llm_registry,
     get_skill_registry,
 )
-from backend.alice.domain.memory.services.memory_manager import MemoryManager
 from backend.alice.domain.execution.services.execution_service import ExecutionService
 from backend.alice.domain.execution.services.tool_registry import ToolRegistry
-from backend.alice.domain.llm.services.chat_service import ChatService
-from backend.alice.domain.llm.services.stream_service import StreamService
-from backend.alice.domain.skills.services.skill_cache import SkillCache
-from backend.alice.domain.skills.services.skill_registry import SkillRegistry
 from backend.alice.domain.llm.providers.base import BaseLLMProvider, ProviderCapability
 from backend.alice.domain.llm.providers.openai_provider import OpenAIProvider
-
+from backend.alice.domain.llm.services.chat_service import ChatService
+from backend.alice.domain.llm.services.stream_service import StreamService
+from backend.alice.domain.memory.services.memory_manager import MemoryManager
+from backend.alice.domain.skills.services.skill_cache import SkillCache
+from backend.alice.domain.skills.services.skill_registry import SkillRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -43,23 +42,23 @@ class OrchestrationService:
 
     def __init__(
         self,
-        memory_manager: Optional[MemoryManager] = None,
-        execution_service: Optional[ExecutionService] = None,
-        chat_service: Optional[ChatService] = None,
-        stream_service: Optional[StreamService] = None,
-        skill_registry: Optional[SkillRegistry] = None,
-        llm_provider: Optional[BaseLLMProvider] = None,
-        tool_registry: Optional[ToolRegistry] = None,
+        memory_manager: MemoryManager | None = None,
+        execution_service: ExecutionService | None = None,
+        chat_service: ChatService | None = None,
+        stream_service: StreamService | None = None,
+        skill_registry: SkillRegistry | None = None,
+        llm_provider: BaseLLMProvider | None = None,
+        tool_registry: ToolRegistry | None = None,
         function_calling_orchestrator: Any | None = None,
         harness_bundle: Any | None = None,
     ):
-        self.memory_manager: Optional[MemoryManager] = memory_manager
-        self.execution_service: Optional[ExecutionService] = execution_service
-        self.chat_service: Optional[ChatService] = chat_service
-        self.stream_service: Optional[StreamService] = stream_service
-        self.skill_registry: Optional[SkillRegistry] = skill_registry
-        self.llm_provider: Optional[BaseLLMProvider] = llm_provider
-        self.tool_registry: Optional[ToolRegistry] = tool_registry
+        self.memory_manager: MemoryManager | None = memory_manager
+        self.execution_service: ExecutionService | None = execution_service
+        self.chat_service: ChatService | None = chat_service
+        self.stream_service: StreamService | None = stream_service
+        self.skill_registry: SkillRegistry | None = skill_registry
+        self.llm_provider: BaseLLMProvider | None = llm_provider
+        self.tool_registry: ToolRegistry | None = tool_registry
         self.function_calling_orchestrator: Any | None = function_calling_orchestrator
         self.harness_bundle: Any | None = harness_bundle
         self.runtime_context_builder = RuntimeContextBuilder()
@@ -72,7 +71,7 @@ class OrchestrationService:
         *,
         capabilities: ProviderCapability | None = None,
         extra_headers: dict | None = None,
-    ) -> "OrchestrationService":
+    ) -> OrchestrationService:
         return cls.create_from_config(
             api_key=settings.llm.api_key,
             base_url=settings.llm.base_url,
@@ -92,6 +91,7 @@ class OrchestrationService:
             skill_source_name=settings.harness.skill_source_name,
             harness_name=settings.harness.name,
             max_history=settings.workflow.max_history,
+            skills_dirs=[str(settings.project_root / d) for d in settings.skills_dirs],
         )
 
     @classmethod
@@ -115,8 +115,9 @@ class OrchestrationService:
         extra_headers: dict | None = None,
         request_header_profiles: list[dict] | None = None,
         capabilities: ProviderCapability | None = None,
+        skills_dirs: list[str] | None = None,
         _todo_path: str | None = None,
-    ) -> "OrchestrationService":
+    ) -> OrchestrationService:
         _ = todo_path, _todo_path
 
         llm_registry = get_llm_registry()
@@ -135,7 +136,7 @@ class OrchestrationService:
         skill_registry_factory = get_skill_registry()
         skill_registry = skill_registry_factory.create_runtime_registry(
             skill_source_name,
-            project_root=project_root,
+            skills_dirs=skills_dirs,
         )
         skill_registry.refresh()
 
@@ -186,7 +187,7 @@ class OrchestrationService:
             harness_bundle=harness_bundle,
         )
 
-        execution_service.set_skill_snapshot(skill_registry, SkillCache())
+        execution_service.set_skill_snapshot(skill_registry, SkillCache(skills_dirs=skills_dirs))
 
         return orchestration
 
@@ -194,7 +195,7 @@ class OrchestrationService:
     def _load_prompt(prompt_path: str) -> str:
         try:
             if Path(prompt_path).exists():
-                with open(prompt_path, "r", encoding="utf-8") as f:
+                with open(prompt_path, encoding="utf-8") as f:
                     return f.read()
         except Exception as e:
             logger.warning(f"加载提示词失败: {e}")

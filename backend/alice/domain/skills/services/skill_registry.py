@@ -5,11 +5,11 @@
 """
 
 import logging
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
 
-from ..models import Skill, SkillMetadata
 from ..loaders import CacheSkillLoader
+from ..models import Skill
 
 logger = logging.getLogger(__name__)
 
@@ -20,13 +20,19 @@ class SkillRegistry:
     管理所有已注册的技能，提供查询和列表功能。
     """
 
-    def __init__(self, loader: CacheSkillLoader | None = None):
+    def __init__(self, loader: CacheSkillLoader | None = None, skills_dirs: Sequence[str | Path] | None = None):
         """初始化注册表
 
         Args:
             loader: 技能加载器实例，如果为 None 则创建默认实例
+            skills_dirs: 技能目录路径列表，用于创建默认加载器
         """
-        self.loader = loader or CacheSkillLoader()
+        if loader is not None:
+            self.loader = loader
+        elif skills_dirs is not None:
+            self.loader = CacheSkillLoader(skills_dirs)
+        else:
+            self.loader = CacheSkillLoader()
         self._refreshed = False
 
     def refresh(self) -> int:
