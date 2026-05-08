@@ -2,7 +2,7 @@
 
 - **ADR**: ADR-003
 - **ADR Title**: TUI 错误码分级展示与后端错误分类体系
-- **Stage**: validate
+- **Stage**: close
 - **Created At**: 2026-05-08T20:59:33
 - **Summary**: TUI 错误码分级展示：后端错误分类体系 + 桥接协议 code 字段落地 + stderr 日志泄露整治
 
@@ -72,12 +72,14 @@ pytest backend/tests: 295 passed（基线不变）。cargo build: 通过。cargo
 
 ## Closure Summary
 
-待补充
+TUI 错误码分级展示已实现：1. Rust BridgeMessage::Error 新增 code: Option\<String\> 字段(serde default 向后兼容)。2. is_actionable_stderr_error 收紧为仅放行 [FATAL]/[CRITICAL]，消除 traceback 泄露。3. Python 定义 ERROR_FATAL/ERROR_RECOVERABLE/ERROR_WARN 常量，_send_error 5 个调用点全部分配 code。4. openai_provider.py exc_info=True 降级为 isEnabledFor(DEBUG)。5. pytest 295 passed + cargo test 基线不变。6. 测试更新 4 个 bridge parity 断言接受 code 字段。Commit: e0a0e13。
+
 
 ## References
 
-- **Commits**: 待补充
-- **Plan**: 待补充
+- **Commits**: 待从 git 自动采集
+- **Plan**: doc/arch/plans/ADR-003-plan-001.md
+
 
 ## Risks and Rollback
 
