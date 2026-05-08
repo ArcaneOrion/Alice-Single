@@ -56,8 +56,9 @@ fn strip_ansi_codes(s: &str) -> String {
 /// Determine if a stderr line represents an actionable error that should be
 /// surfaced to the user in the TUI.
 ///
-/// - Python log-format lines (starting with `YYYY-MM-DD`): only ERROR/CRITICAL/Traceback
-/// - Non-Python-log stderr content: treated as actionable
+/// - Python log-format lines (starting with `YYYY-MM-DD`): only FATAL/CRITICAL are actionable
+/// - Traceback continuation lines (whitespace-prefixed) and "Traceback" headers: suppressed
+/// - Non-Python-log stderr content (interpreter crash, segfault): always actionable
 pub fn is_actionable_stderr_error(line: &str) -> bool {
     let stripped = strip_ansi_codes(line);
     let trimmed = stripped.trim();
@@ -76,6 +77,16 @@ pub fn is_actionable_stderr_error(line: &str) -> bool {
         // ERROR/Traceback go to runtime_log only to avoid polluting the UI.
         return trimmed.contains("[FATAL]")
             || trimmed.contains("[CRITICAL]");
+    }
+
+    // Traceback lines from exc_info output: suppress to avoid polluting TUI.
+    // Traceback continuation lines start with whitespace (frame details, code context).
+    if stripped.starts_with(' ') || stripped.starts_with('\t') {
+        return false;
+    }
+    // Traceback header line: "Traceback (most recent call last):"
+    if trimmed.starts_with("Traceback") {
+        return false;
     }
 
     // Non-Python-log stderr content (e.g., interpreter crash, segfault) is always actionable
@@ -865,6 +876,35 @@ mod tests {
 
         assert!(app.should_quit);
         assert!(dispatcher.should_quit());
+    }
+
+    #[test]
+    fn test_is_actionable_stderr_error() {
+        // Python log lines with timestamp: only FATAL/CRITICAL are actionable
+        assert!(is_actionable_stderr_error(
+            "2026-05-08 21:35:03,149 [\x1b[31mFATAL\x1b[0m] backend: init failed"
+        ));
+        assert!(is_actionable_stderr_error(
+            "2026-05-08 21:35:03,149 [CRITICAL] backend: something broke"
+        ));
+        assert!(!is_actionable_stderr_error(
+            "2026-05-08 21:35:03,149 [ERROR] backend.alice...: Chat request failed"
+        ));
+        assert!(!is_actionable_stderr_error(
+            "2026-05-08 21:35:03,149 [WARNING] backend: slow query"
+        ));
+
+        // Traceback lines: never actionable
+        assert!(!is_actionable_stderr_error("Traceback (most recent call last):"));
+        assert!(!is_actionable_stderr_error(
+            "  File \"/app/main.py\", line 42, in run"
+        ));
+        assert!(!is_actionable_stderr_error("    for chunk in self.stream():"));
+        assert!(!is_actionable_stderr_error("    ^^^^^^^^^^^^^^^^^^^"));
+
+        // Non-Python-log stderr: still actionable (interpreter crash, etc.)
+        assert!(is_actionable_stderr_error("Segmentation fault (core dumped)"));
+        assert!(is_actionable_stderr_error("Fatal Python error: Aborted"));
     }
 
     #[test]
