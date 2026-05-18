@@ -583,7 +583,7 @@ class ChatWorkflow(Workflow):
             )
 
             if not tool_calls:
-                self.chat_service.add_assistant_message(full_content)
+                self.chat_service.add_assistant_message(full_content, reasoning_content=full_thinking or None)
                 log_transition(
                     phase="iteration_end",
                     message="Chat workflow iteration completed",
@@ -630,6 +630,7 @@ class ChatWorkflow(Workflow):
                 orchestration_result = self.function_calling_orchestrator.execute_tool_calls(
                     tool_calls,
                     assistant_content=full_content,
+                    reasoning_content=full_thinking or None,
                     log_context={
                         **base_log_context,
                         "span_id": f"{base_log_context['span_id']}.iter{iteration}",

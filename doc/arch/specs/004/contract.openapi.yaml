@@ -1,0 +1,26 @@
+本变更不涉及外部 API 端点修改，仅影响内部数据结构的序列化格式。
+
+### 2.1 OpenAI 兼容消息格式变更
+
+**序列化输出变更**：`ChatMessage.to_dict()` 对于 `role=assistant` 的消息，当 `reasoning_content` 非空时新增该字段。
+
+**变更前后对比**：
+
+变更前（assistant 消息）：
+```json
+{"role": "assistant", "content": "...", "tool_calls": [...]}
+```
+
+变更后（含 thinking 时）：
+```json
+{"role": "assistant", "content": "...", "reasoning_content": "思考过程...", "tool_calls": [...]}
+```
+
+变更后（无 thinking 时，与变更前一致）：
+```json
+{"role": "assistant", "content": "...", "tool_calls": [...]}
+```
+
+**兼容性保证**：`reasoning_content` 为 None 或空字符串时不输出该字段，行为与变更前完全一致。OpenAI 等忽略未知字段的 API 不受影响。
+
+---

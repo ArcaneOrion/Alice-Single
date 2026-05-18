@@ -28,7 +28,9 @@ _(尚无 ADR。运行 `/spec-vc adr-new "<title>"` 创建第一条,或运行 `/s
 |------|------|------|------|
 | ADR-000 | 采用 ADR 方法论 | Accepted | 2026-04-28 |
 | ADR-001 | 目录结构重组：skills 归入后端包、Dockerfile 建 docker/ 目录收容 | Accepted | 2026-05-06 |
-| ADR-002 | 支持双目录 skill 加载：内置 skills 与用户自定义 skills 分离 | Proposed | 2026-05-06 |
+| ADR-002 | 支持双目录 skill 加载：内置 skills 与用户自定义 skills 分离 | Accepted | 2026-05-06 |
+| ADR-003 | TUI 错误码分级展示与后端错误分类体系 | Accepted | 2026-05-08 |
+| ADR-004 | ChatMessage reasoning_content 兼容：修复 thinking mode 多轮对话消息回传缺失 | Accepted | 2026-05-18 |
 
 ## 状态图例
 

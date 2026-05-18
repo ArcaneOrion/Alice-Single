@@ -398,17 +398,18 @@ class ChatService:
         self.add_message(msg)
         return msg
 
-    def add_assistant_message(self, content: str, tool_calls: list[dict] | None = None) -> ChatMessage:
+    def add_assistant_message(self, content: str, tool_calls: list[dict] | None = None, reasoning_content: str | None = None) -> ChatMessage:
         """添加助手消息
 
         Args:
             content: 消息内容
             tool_calls: 工具调用列表
+            reasoning_content: 推理/思考内容（用于 thinking mode 多轮回传）
 
         Returns:
             创建的消息对象
         """
-        msg = ChatMessage.assistant(content, tool_calls)
+        msg = ChatMessage.assistant(content, tool_calls=tool_calls, reasoning_content=reasoning_content)
         self.add_message(msg)
         return msg
 
@@ -486,7 +487,7 @@ class ChatService:
 
         response = self.provider.chat(self._messages, **kwargs)
 
-        self.add_assistant_message(response.content, response.tool_calls)
+        self.add_assistant_message(response.content, response.tool_calls, reasoning_content=response.thinking or None)
 
         return response
 
@@ -537,7 +538,7 @@ class ChatService:
             model=self.provider.model_name,
         )
 
-        self.add_assistant_message(response.content, response.tool_calls)
+        self.add_assistant_message(response.content, response.tool_calls, reasoning_content=full_thinking or None)
 
         return response
 

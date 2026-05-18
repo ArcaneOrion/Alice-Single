@@ -27,6 +27,7 @@ class ChatMessage:
         name: 可选的消息名称（用于标识不同的工具调用）
         tool_call_id: 可选的工具调用 ID
         tool_calls: 可选的工具调用列表
+        reasoning_content: 可选的推理/思考内容（用于 thinking mode 多轮回传）
     """
 
     role: Literal["system", "user", "assistant", "tool"]
@@ -34,6 +35,7 @@ class ChatMessage:
     name: str | None = None
     tool_call_id: str | None = None
     tool_calls: list[dict] | None = None
+    reasoning_content: str | None = None
 
     def to_dict(self) -> dict:
         """转换为字典格式，用于 API 调用"""
@@ -44,6 +46,8 @@ class ChatMessage:
             result["tool_call_id"] = self.tool_call_id
         if self.tool_calls is not None:
             result["tool_calls"] = self.tool_calls
+        if self.reasoning_content:
+            result["reasoning_content"] = self.reasoning_content
         return result
 
     @classmethod
@@ -55,6 +59,7 @@ class ChatMessage:
             name=data.get("name"),
             tool_call_id=data.get("tool_call_id"),
             tool_calls=data.get("tool_calls"),
+            reasoning_content=data.get("reasoning_content"),
         )
 
     @classmethod
@@ -68,9 +73,9 @@ class ChatMessage:
         return cls(role="user", content=content)
 
     @classmethod
-    def assistant(cls, content: str, tool_calls: list[dict] | None = None) -> "ChatMessage":
+    def assistant(cls, content: str, tool_calls: list[dict] | None = None, reasoning_content: str | None = None) -> "ChatMessage":
         """创建助手消息"""
-        return cls(role="assistant", content=content, tool_calls=tool_calls)
+        return cls(role="assistant", content=content, tool_calls=tool_calls, reasoning_content=reasoning_content)
 
     @classmethod
     def tool(cls, content: str, tool_call_id: str) -> "ChatMessage":

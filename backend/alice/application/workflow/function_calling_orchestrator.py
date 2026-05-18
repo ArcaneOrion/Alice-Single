@@ -40,12 +40,14 @@ class FunctionCallingOrchestrator:
         self,
         tool_calls: list[dict[str, Any]],
         assistant_content: str = "",
+        reasoning_content: str | None = None,
         log_context: dict[str, Any] | None = None,
     ) -> FunctionCallingOrchestrationResult:
         invocations = [ToolInvocation.from_tool_call(tool_call) for tool_call in tool_calls]
         assistant_message = ChatMessage.assistant(
             assistant_content,
             tool_calls=[invocation.to_assistant_tool_call() for invocation in invocations],
+            reasoning_content=reasoning_content,
         )
 
         execution_results: list[ToolExecutionResult] = []

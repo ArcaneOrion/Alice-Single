@@ -1,0 +1,31 @@
+### 3.1 核心实体
+
+#### ChatMessage
+
+| 字段 | 类型 | 必填 | 描述 | 约束 | 示例 |
+|------|------|------|------|------|------|
+| role | Literal["system", "user", "assistant", "tool"] | 是 | 消息角色 | 枚举值 | "assistant" |
+| content | str | 是 | 消息内容 | 非空 | "你好" |
+| name | str \| None | 否 | 消息名称 | 仅 tool 角色使用 | "get_weather" |
+| tool_call_id | str \| None | 否 | 工具调用 ID | 仅 tool 角色使用 | "call_abc123" |
+| tool_calls | list[dict] \| None | 否 | 工具调用列表 | 仅 assistant 角色使用 | [{"id": "...", "type": "function", "function": {...}}] |
+| **reasoning_content** | **str \| None** | **否** | **推理/思考内容** | **仅 assistant 角色使用；为 None 或空串时不序列化** | **"让我分析一下..."** |
+
+### 3.2 序列化规则
+
+`to_dict()` 输出规则：
+- `reasoning_content` 为 `None` 或空字符串 `""` 时，**不输出**该字段（保持变更前行为）
+- `reasoning_content` 为非空字符串时，**输出**该字段
+
+`from_dict()` 反序列化规则：
+- 输入 dict 含 `reasoning_content` 键且值为非空字符串时，读入该字段
+- 输入 dict 不含该键或值为空/None 时，字段设为 `None`
+
+### 3.3 数据关系
+
+`reasoning_content` 字段与 `ChatResponse.thinking` 和 `StreamChunk.thinking` 对应：
+- `ChatResponse.thinking` → 写入 `ChatMessage.reasoning_content`
+- `StreamChunk.thinking`（累积后） → 写入 `ChatMessage.reasoning_content`
+- 消息历史中的 `reasoning_content` → 通过 `to_dict()` 发送给 API
+
+---
