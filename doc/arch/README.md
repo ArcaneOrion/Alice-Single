@@ -31,6 +31,7 @@ _(尚无 ADR。运行 `/spec-vc adr-new "<title>"` 创建第一条,或运行 `/s
 | ADR-002 | 支持双目录 skill 加载：内置 skills 与用户自定义 skills 分离 | Accepted | 2026-05-06 |
 | ADR-003 | TUI 错误码分级展示与后端错误分类体系 | Accepted | 2026-05-08 |
 | ADR-004 | ChatMessage reasoning_content 兼容：修复 thinking mode 多轮对话消息回传缺失 | Accepted | 2026-05-18 |
+| ADR-005 | Alice 重定位为个人 AI 自迭代实验场 | Accepted | 2026-05-26 |
 
 ## 状态图例
 
